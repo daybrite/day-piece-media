@@ -1,0 +1,14 @@
+app_title = Media Demo
+caption = Play the bundled clip and follow the player’s status.
+play = Play
+pause = Pause
+stop = Stop
+reload = Reload
+volume = Volume
+volume_hint = Raise the volume to hear the test tone.
+state_idle = Idle
+state_loading = Loading
+state_playing = Playing
+state_paused = Paused
+state_ended = Ended
+state_error = Playback unavailable: { $reason }

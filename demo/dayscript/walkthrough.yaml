@@ -1,0 +1,19 @@
+name: media-demo
+description: Play a bundled clip and check the native player's state after each transport action.
+flow:
+  - wait_for: { id: media-player }
+  - assert_visible: { id: media-title }
+  - screenshot: media-ready
+  - tap: { id: media-play }
+  # Homebrew GTK ships no media backend; its error view is still a supported demo outcome.
+  - assert_text: { id: media-state, key: state_playing, skip_on: [macos-gtk, windows-gtk, windows-qt] }
+  - screenshot: media-playing
+  - tap: { id: media-pause }
+  - assert_text: { id: media-state, key: state_paused, skip_on: [macos-gtk, windows-gtk, windows-qt] }
+  - set_value: { id: media-volume, value: 0 }
+  - tap: { id: media-stop }
+  - assert_text: { id: media-state, key: state_idle, skip_on: [macos-gtk, windows-gtk, windows-qt] }
+  - tap: { id: media-reload }
+  - assert_text: { id: media-state, key: state_playing, skip_on: [macos-gtk, windows-gtk, windows-qt] }
+  - tap: { id: media-stop }
+  - screenshot: media-stopped

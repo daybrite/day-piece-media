@@ -1,0 +1,105 @@
+name: ci
+
+# Build the crate on desktop hosts, cross-check mobile/web Rust, and exercise the bundled demo.
+on:
+  push:
+    branches: ["**"]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Daily: day's main moves on weeks nobody pushes here.
+    - cron: "0 5 * * *"
+
+permissions:
+  contents: write # release-asset upload on tag builds
+
+jobs:
+  host:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, features: gtk }
+          - { os: ubuntu-latest, features: qt }
+          - { os: macos-15, features: appkit }
+          - { os: windows-latest, features: xaml }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install the toolkit and media libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          case "${{ matrix.features }}" in
+            gtk) sudo apt-get install -y --no-install-recommends libgtk-4-dev libadwaita-1-dev libgtk-4-media-gstreamer gstreamer1.0-plugins-good gstreamer1.0-libav pkg-config ;;
+            qt) sudo apt-get install -y --no-install-recommends qt6-base-dev qt6-multimedia-dev pkg-config ;;
+          esac
+      - run: cargo fmt --all -- --check
+        if: matrix.features == 'gtk'
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --features ${{ matrix.features }} -- -D warnings
+      - run: cargo test
+      - uses: actions/setup-node@v6
+        if: matrix.features == 'gtk'
+        with:
+          node-version: '22'
+      - run: node --test tests/browser.mjs
+        if: matrix.features == 'gtk'
+
+  # The mobile and web arms compile for their targets. A link is not attempted here — the demo
+  # below does that inside a real app — but an objc2 call that no longer type-checks, a JNI
+  # signature drift in the Android arm, or a wasm-only API change fails here in a minute.
+  cross-check:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15, target: aarch64-apple-ios-sim, features: uikit }
+          - { os: ubuntu-latest, target: aarch64-linux-android, features: mdc }
+          # The getrandom backend cfg is what `day build` sets for every web app; without it
+          # getrandom refuses to compile for wasm32-unknown-unknown.
+          - { os: ubuntu-latest, target: wasm32-unknown-unknown, features: dom, rustflags: '--cfg getrandom_backend="custom"' }
+    runs-on: ${{ matrix.os }}
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo clippy --target ${{ matrix.target }} --features ${{ matrix.features }} -- -D warnings
+
+  demo:
+    uses: daybrite/actions/.github/workflows/dayapp.yml@main
+    secrets: inherit
+    with:
+      project-path: demo
+      targets: macos-appkit, macos-gtk, macos-qt, windows-xaml, ios-uikit, android-mdc, web-dom, harmony-arkui
+      # The CLI that builds, and the framework revision: with no lock committed the shared
+      # workflow resolves one fresh, and this moves every leg to the same tip-of-main revision.
+      day-version: main
+      update-day-deps: true
+      scripts: dayscript/walkthrough.yaml
+      preflight-checks: fmt, clippy, test
+      ios-devices: |
+        device=iPhone, orientation=portrait
+      android-devices: |
+        device=pixel_7,     os=36, orientation=portrait
+
+  # Linux players need codec packages in addition to the toolkit installed by the shared job.
+  demo-linux:
+    uses: daybrite/actions/.github/workflows/dayapp.yml@main
+    secrets: inherit
+    with:
+      project-path: demo
+      setup-command: |
+        sudo apt-get update
+        sudo apt-get install -y libgtk-4-media-gstreamer gstreamer1.0-plugins-good gstreamer1.0-libav qt6-multimedia-dev
+      targets: linux-gtk, linux-qt
+      day-version: main
+      update-day-deps: true
+      scripts: dayscript/walkthrough.yaml
+      # setup-command bypasses the shared preflight; the demo job above runs it.
+      preflight-checks: ""

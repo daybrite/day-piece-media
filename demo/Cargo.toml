@@ -1,0 +1,39 @@
+[package]
+name = "media-demo"
+version = "0.1.0"
+edition = "2024"
+# Generates typed `res::` constants from `resource/` (see build.rs).
+build = "build.rs"
+
+[features]
+# `mock` keeps bare cargo and rust-analyzer compiling; `day build` overrides it with
+# `--no-default-features --features <backend>` (https://daybrite.dev/docs/project-structure).
+default = ["mock"]
+appkit = ["day/appkit"]
+gtk = ["day/gtk"]
+qt = ["day/qt"]
+uikit = ["day/uikit"]
+mdc = ["day/mdc"]
+xaml = ["day/xaml"]
+arkui = ["day/arkui"]
+dom = ["day/dom"]
+mock = ["day/mock"]
+
+# rlib for the desktop bin; the mobile pipeline requests staticlib/cdylib via `cargo rustc`.
+[lib]
+# A constant lib name: staged artifacts and the `dayapp::` import never move on a package rename.
+name = "dayapp"
+crate-type = ["rlib"]
+
+[dependencies]
+day = { git = "https://github.com/daybrite/day.git" }
+day-piece-media = { path = ".." }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+day-part-fs = { git = "https://github.com/daybrite/day.git" }
+
+[build-dependencies]
+day-build = { git = "https://github.com/daybrite/day.git" }
+
+
+[workspace]

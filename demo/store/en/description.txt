@@ -1,0 +1,1 @@
+A developer sample for day-piece-media. Play a bundled test clip, pause it, stop it, reload it, and adjust its volume. The status display follows the native media player.
