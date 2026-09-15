@@ -100,7 +100,7 @@ handling. Each `src/lib-<toolkit>.rs` implements a renderer. Native renderers re
 | Backend | Supporting implementation | Build integration |
 |---|---|---|
 | AppKit / UIKit | Rust Objective-C bindings around AVPlayer and native views. UIKit declares AVPlayerViewController bindings locally. | Apple frameworks from `package.metadata.day.macos` and `.ios`. |
-| Android | [DayMedia.java](../platform/android/java/dev/daybrite/day/piece/media/DayMedia.java): VideoView for video, MediaPlayer for audio. | Java sources and INTERNET permission from `.android`; no additional Gradle libraries. |
+| Android | [DayMedia.java](../src/DayMedia.java): VideoView for video, MediaPlayer for audio. | Java sources and INTERNET permission from `.android`; no additional Gradle libraries. |
 | GTK | [lib-gtk.rs](../src/lib-gtk.rs): GtkVideo and GtkMediaFile. | `gtk4` bindings; playback backend and codecs installed with GTK. |
 | Qt | [lib-qt-shim.cpp](../src/lib-qt-shim.cpp): QMediaPlayer, QAudioOutput, QVideoWidget. | `build.rs` compiles the shim and probes `Qt6MultimediaWidgets` with pkg-config. |
 | Windows XAML | [lib-xaml-shim.cpp](../src/lib-xaml-shim.cpp): MediaPlayerElement and MediaPlayer. | `build.rs` compiles C++/WinRT against the Windows SDK. |
