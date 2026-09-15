@@ -129,3 +129,15 @@ frameworks = ["AVKit", "AVFoundation", "CoreMedia", "AVFAudio"]
 # declaration is harmless there.
 [package.metadata.day.macos]
 frameworks = ["AVKit", "AVFoundation", "CoreMedia"]
+
+# --- AppImage launcher default (docs/extending.md) ---
+# linuxdeploy bundles libgstreamer but none of GStreamer's element plugins, and the bundled library
+# looks for plugins only beside itself (GStreamer relocates its plugin dir from where libgstreamer
+# loaded). Qt Multimedia's default GStreamer backend then finds no `queue`, `decodebin` or
+# `videoconvert` inside the AppImage and crashes. Qt's FFmpeg backend has its codec libraries in its
+# own link closure, which linuxdeploy bundles, so the AppImage selects that one. A QT_MEDIA_BACKEND
+# the user already set still wins.
+[[package.metadata.day.appimage.env]]
+toolkit = "qt"
+name = "QT_MEDIA_BACKEND"
+value = "ffmpeg"

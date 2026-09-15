@@ -131,6 +131,11 @@ the next play or load.
   error. GtkVideo's transport overlay cannot be hidden.
 - Qt builds a URL-label fallback when Qt Multimedia is absent. Its player has no transport
   controls; use the piece's triggers.
+- A linux-qt AppImage plays through Qt's FFmpeg backend. The AppImage bundles libgstreamer but
+  none of GStreamer's element plugins, and the bundled library looks for plugins only beside
+  itself, so the GStreamer backend would find no elements and crash. The crate's
+  `[package.metadata.day.appimage]` table sets `QT_MEDIA_BACKEND=ffmpeg` in the AppImage
+  launcher. A `QT_MEDIA_BACKEND` already set in the user's environment takes precedence.
 - XAML codec support depends on Windows. Failure to create its native player produces an error
   and a URL-label fallback.
 - HarmonyOS requires a working system media service and plugins. The local OpenHarmony QEMU
