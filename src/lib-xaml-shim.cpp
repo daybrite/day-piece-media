@@ -9,8 +9,9 @@
 //
 // Playback state goes back through one file-static callback (day_media_xaml_set_state_cb), fed by
 // the player's PlaybackSession.PlaybackStateChanged, MediaEnded, and MediaFailed events, as the
-// piece's own codes: 0 idle, 1 loading, 2 playing, 3 paused, 4 ended, 5 error. A sound-only
-// player keeps the same element, collapsed, so one code path serves both shapes.
+// piece's own codes: 0 idle, 1 loading, 2 playing, 3 paused, 4 ended, 5 error. Those events arrive
+// on a worker thread; the Rust side posts each report to the UI thread (src/lib-xaml.rs). A
+// sound-only player keeps the same element, collapsed, so one code path serves both shapes.
 //
 // Written blind (no Windows host here); Windows-only, compiled by build.rs and linked alongside
 // day-xaml-sys. MediaPlayerElement is core system XAML so construction can't fail like EdgeHTML,
@@ -24,8 +25,10 @@
 
 #include <windows.h>
 
+#include <atomic>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 
 using namespace winrt;
@@ -42,11 +45,15 @@ extern "C" void *day_xaml_unbox(void *handle);
 typedef void (*DayMediaStateCb)(uint64_t, int, const char *);
 static DayMediaStateCb g_state_cb = nullptr;
 
-// Per-handle bookkeeping the element itself cannot carry: the node to report to, and whether the
-// player is sound-only (which measures zero).
+// Set while a player is stopped, and read by its event handlers on the worker thread (wire_state).
+using StoppedFlag = std::shared_ptr<std::atomic<bool>>;
+
+// Per-handle bookkeeping the element itself cannot carry: the node to report to, whether the
+// player is sound-only (which measures zero), and its stopped flag.
 struct DayMediaInfo {
     uint64_t id = 0;
     bool audioOnly = false;
+    StoppedFlag stopped;
 };
 static std::map<void *, DayMediaInfo> g_info;
 
@@ -104,9 +111,15 @@ static WMP::MediaPlayer player_of(void *handle) {
     return nullptr;
 }
 
-static void wire_state(const WMP::MediaPlayer &player, uint64_t id) {
+// MediaPlayer has no Stop, so day_media_xaml_stop pauses and drops the source, then reports idle
+// itself. The Paused and None states that pause and removal raise arrive later, from the worker
+// thread, and would overwrite that idle; while `stopped` is set the handlers drop them. Play and
+// Load clear it before they start the player again. A failure reports regardless.
+static void wire_state(const WMP::MediaPlayer &player, uint64_t id, const StoppedFlag &stopped) {
     player.PlaybackSession().PlaybackStateChanged(
-        [id](const WMP::MediaPlaybackSession &session, const WF::IInspectable &) {
+        [id, stopped](const WMP::MediaPlaybackSession &session, const WF::IInspectable &) {
+            if (stopped->load())
+                return;
             switch (session.PlaybackState()) {
             case WMP::MediaPlaybackState::None:
                 report(id, 0);
@@ -123,11 +136,20 @@ static void wire_state(const WMP::MediaPlayer &player, uint64_t id) {
                 break;
             }
         });
-    player.MediaEnded([id](const WMP::MediaPlayer &, const WF::IInspectable &) { report(id, 4); });
+    player.MediaEnded([id, stopped](const WMP::MediaPlayer &, const WF::IInspectable &) {
+        if (!stopped->load())
+            report(id, 4);
+    });
     player.MediaFailed([id](const WMP::MediaPlayer &, const WMP::MediaPlayerFailedEventArgs &args) {
         std::string text = utf8(args.ErrorMessage());
         report(id, 5, text.empty() ? std::string{"playback failed"} : text);
     });
+}
+
+static void set_stopped(void *handle, bool on) {
+    auto it = g_info.find(handle);
+    if (it != g_info.end() && it->second.stopped)
+        it->second.stopped->store(on);
 }
 
 extern "C" {
@@ -137,13 +159,14 @@ void day_media_xaml_set_state_cb(DayMediaStateCb cb) { g_state_cb = cb; }
 void *day_media_xaml_new(uint64_t id, const char *url, int autoplay, int looping, int muted,
                          int controls, int audio_only, double volume) {
     void *handle = nullptr;
+    auto stopped = std::make_shared<std::atomic<bool>>(false);
     try {
         WMP::MediaPlayer player;
         player.AutoPlay(autoplay != 0);
         player.IsMuted(muted != 0);
         player.IsLoopingEnabled(looping != 0);
         player.Volume(volume);
-        wire_state(player, id);
+        wire_state(player, id, stopped);
         if (auto src = source_from(url))
             player.Source(src);
         WUXC::MediaPlayerElement mpe;
@@ -159,11 +182,12 @@ void *day_media_xaml_new(uint64_t id, const char *url, int autoplay, int looping
         handle = day_xaml_box(winrt::get_abi(tb));
         report(id, 5, "the media player could not be created");
     }
-    g_info[handle] = DayMediaInfo{id, audio_only != 0};
+    g_info[handle] = DayMediaInfo{id, audio_only != 0, stopped};
     return handle;
 }
 
 void day_media_xaml_load(void *handle, const char *url) {
+    set_stopped(handle, false);
     try {
         if (auto p = player_of(handle)) {
             if (auto src = source_from(url))
@@ -174,6 +198,7 @@ void day_media_xaml_load(void *handle, const char *url) {
     }
 }
 void day_media_xaml_play(void *handle) {
+    set_stopped(handle, false);
     try {
         if (auto p = player_of(handle))
             p.Play();
@@ -187,9 +212,10 @@ void day_media_xaml_pause(void *handle) {
     } catch (...) {
     }
 }
-// Dropping the source is what lets a live stream's connection go; the session reports the None
-// state that follows.
+// Dropping the source is what lets a live stream's connection go. The flag goes up first, so the
+// Paused and None states this raises cannot follow the idle reported below (see wire_state).
 void day_media_xaml_stop(void *handle) {
+    set_stopped(handle, true);
     try {
         if (auto p = player_of(handle)) {
             p.Pause();

@@ -330,8 +330,43 @@ impl Media {
     }
 }
 
-impl Piece for Media {
-    fn build(self, cx: &mut BuildCx) -> RNode {
+/// An audio player owned by the application rather than by a window.
+/// Commands and readback use the same signals and triggers as the visual media piece.
+pub struct AudioService {
+    resource: day_core::ServiceResource,
+}
+
+impl day_core::ApplicationService for AudioService {
+    fn shutdown(&self) {
+        if let Some(node) = self.resource.node() {
+            with_tree(|tree| tree.patch(node, Box::new(MediaPatch::Stop), false));
+        }
+        self.resource.close();
+    }
+}
+
+impl Media {
+    /// Start an application-owned audio service. Call once during application setup.
+    /// This disables video and inline controls. OS background privileges and media-session
+    /// integration are separate from the resource's lifetime.
+    pub fn start_audio(mut self) -> std::rc::Rc<AudioService> {
+        self.audio_only = true;
+        self.controls = false;
+        day_core::application_service(move || {
+            let mut resource = None;
+            self.mount(|props| {
+                let native = day_core::ServiceResource::new(KIND, props);
+                let node = native.node().expect("new audio resource");
+                resource = Some(native);
+                node
+            });
+            AudioService {
+                resource: resource.expect("audio resource was created"),
+            }
+        })
+    }
+
+    fn mount(self, create: impl FnOnce(&MediaProps) -> RNode) -> RNode {
         let Media {
             url,
             autoplay,
@@ -356,18 +391,8 @@ impl Piece for Media {
             audio_only,
             volume: volume.as_ref().map_or(1.0, FractionSource::initial),
         };
-        // A media player has no intrinsic size — it fills whatever space its container offers.
-        // A sound-only one takes none: its arm measures zero, and growing would hand it a
-        // container's spare room for nothing.
-        let node = cx.leaf(
-            KIND,
-            &initial,
-            Flex {
-                grow_w: !audio_only,
-                grow_h: !audio_only,
-                ..Default::default()
-            },
-        );
+        let node = create(&initial);
+        let mut cx = BuildCx::new(node);
 
         let send = move |patch: MediaPatch| {
             with_tree(|t| t.patch(node, Box::new(patch), false));
@@ -467,6 +492,22 @@ impl Piece for Media {
 // `#[path]` keeps the files grouped next to lib.rs. xaml/mock register nothing (the media kind
 // falls back to day's placeholder leaf there).
 // ---------------------------------------------------------------------------
+
+impl Piece for Media {
+    fn build(self, cx: &mut BuildCx) -> RNode {
+        self.mount(|props| {
+            cx.leaf(
+                KIND,
+                props,
+                Flex {
+                    grow_w: !props.audio_only,
+                    grow_h: !props.audio_only,
+                    ..Default::default()
+                },
+            )
+        })
+    }
+}
 
 day_pieces::glue_modules!(appkit, gtk, qt, uikit, mdc, xaml, arkui, dom);
 

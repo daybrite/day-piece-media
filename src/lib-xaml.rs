@@ -8,14 +8,15 @@
 // availability caveat like the EdgeHTML WebView. `.controls` maps to AreTransportControlsEnabled;
 // looping/muted/autoplay/volume live on the backing MediaPlayer. A sound-only player is a
 // collapsed element of no size. Playback state comes back through one file-static C callback the
-// shim calls from the player's PlaybackSession. Windows-only; built + verified in CI.
+// shim calls from the player's PlaybackSession, on a worker thread; each report is posted to the
+// UI thread before it becomes an event (see `on_state`). Windows-only; built + verified in CI.
 // ---------------------------------------------------------------------------
 
 use super::*;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 
-use day_spec::{NodeId, Proposal, Size};
+use day_spec::{NodeId, Platform, Proposal, Size};
 use day_xaml::{WinHandle, Xaml};
 
 unsafe extern "C" {
@@ -39,6 +40,12 @@ unsafe extern "C" {
 }
 
 /// One state report from the shim: the code is the piece's own, the text an error's message.
+///
+/// MediaPlayer raises its events on a worker thread, and day takes events only on the UI thread:
+/// day-xaml's event sink is thread-local, so an emit made on the worker reached no sink and was
+/// dropped (the video played while the demo's state label still read "Idle"). Every report rides
+/// `Platform::post` home instead, which also queues the shim's own UI-thread reports (Stop's
+/// idle) behind the worker's, in the order they were made.
 extern "C" fn on_state(id: u64, code: c_int, text: *const c_char) {
     let text = if text.is_null() {
         String::new()
@@ -47,14 +54,16 @@ extern "C" fn on_state(id: u64, code: c_int, text: *const c_char) {
             .to_string_lossy()
             .into_owned()
     };
-    day_xaml::emit(
-        NodeId(id),
-        Event::Custom {
-            tag: report::TAG,
-            num: code as f64,
-            text,
-        },
-    );
+    <Xaml as Platform>::post(Box::new(move || {
+        day_xaml::emit(
+            NodeId(id),
+            Event::Custom {
+                tag: report::TAG,
+                num: code as f64,
+                text,
+            },
+        );
+    }));
 }
 
 fn cstr(s: &str) -> CString {
