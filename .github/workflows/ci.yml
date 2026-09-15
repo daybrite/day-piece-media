@@ -76,30 +76,21 @@ jobs:
     secrets: inherit
     with:
       project-path: demo
-      targets: macos-appkit, macos-gtk, macos-qt, windows-xaml, ios-uikit, android-mdc, web-dom, harmony-arkui
+      targets: macos-appkit, macos-gtk, macos-qt, linux-gtk, linux-qt, windows-xaml, ios-uikit, android-mdc, web-dom, harmony-arkui
       # The CLI that builds, and the framework revision: with no lock committed the shared
       # workflow resolves one fresh, and this moves every leg to the same tip-of-main revision.
       day-version: main
       update-day-deps: true
       scripts: dayscript/walkthrough.yaml
       preflight-checks: fmt, clippy, test
+      # The Linux players need more than the toolkit the shared workflow installs: GStreamer's
+      # codecs for the bundled clip on both, GTK's GStreamer media module, and Qt Multimedia
+      # (without it the Qt build falls back to a URL label).
+      target-packages: |
+        linux-gtk, linux-qt: gstreamer1.0-plugins-good gstreamer1.0-libav
+        linux-gtk: libgtk-4-media-gstreamer
+        linux-qt: qt6-multimedia-dev
       ios-devices: |
         device=iPhone, orientation=portrait
       android-devices: |
         device=pixel_7,     os=36, orientation=portrait
-
-  # Linux players need codec packages in addition to the toolkit installed by the shared job.
-  demo-linux:
-    uses: daybrite/actions/.github/workflows/dayapp.yml@main
-    secrets: inherit
-    with:
-      project-path: demo
-      setup-command: |
-        sudo apt-get update
-        sudo apt-get install -y libgtk-4-media-gstreamer gstreamer1.0-plugins-good gstreamer1.0-libav qt6-multimedia-dev
-      targets: linux-gtk, linux-qt
-      day-version: main
-      update-day-deps: true
-      scripts: dayscript/walkthrough.yaml
-      # setup-command bypasses the shared preflight; the demo job above runs it.
-      preflight-checks: ""
