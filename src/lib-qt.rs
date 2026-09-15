@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 // ---------------------------------------------------------------------------
-// Qt: this crate's OWN shim (src/lib-qt-shim.cpp) wrapping QMediaPlayer + QAudioOutput (+ a
+// Qt: this crate's shim (src/lib-qt-shim.cpp) wrapping QMediaPlayer + QAudioOutput (+ a
 // QVideoWidget for pictures) behind a flat C ABI. build.rs compiles it AND links
 // Qt6MultimediaWidgets (which day-qt-sys does not); where that module is absent the shim degrades
 // to a URL label (see the shim's #else). QVideoWidget has no built-in chrome, so `.controls` is a

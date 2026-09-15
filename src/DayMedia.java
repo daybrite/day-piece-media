@@ -1,7 +1,7 @@
 // Copyright © The Daybrite Project
 // SPDX-License-Identifier: MPL-2.0
 
-// The day-piece-media crate's OWN Android backend — bundled here and folded into the app's Gradle
+// The day-piece-media crate's Android backend — bundled here and folded into the app's Gradle
 // build via [package.metadata.day.android], with ZERO edits to day-android. It uses only
 // day-android's PUBLIC Java surface: DayBridge.ctx (the Context) and DayBridge.nativeOnEvent (the
 // event trampoline). android.widget.VideoView + MediaController and android.media.MediaPlayer are
