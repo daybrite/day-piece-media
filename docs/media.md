@@ -149,24 +149,3 @@ backend. The live ICY probe test is ignored by default because it requires a net
 The [demo](../demo/README.md) bundles a generated clip and exercises play, pause, stop, reload,
 and state readback. Run its dayscript on a platform with a working media engine. The shared CI
 workflow builds the app and runs the same script on its configured targets.
-
-## Audio owned by the application
-
-Call `.start_audio()` during application setup to create one player that outlives individual
-windows. It uses the same URL, command triggers, volume binding, and state/metadata signals as
-`media(...)`, but creates no visible piece and forces audio-only playback.
-
-```rust,ignore
-media(stream_url)
-    .autoplay(false)
-    .play(play)
-    .stop(stop)
-    .state(playback_state)
-    .start_audio();
-```
-
-Day retains the service until shutdown. Windows can share its controls without each creating a
-player. The supplied signals must belong to the application, not to a window that can close.
-The service releases its player during application shutdown; explicitly shutting it down twice
-is safe. This ownership API alone does not add lock-screen controls or background privileges.
-Toolkit remount currently stops the service, including Android activity recreation.

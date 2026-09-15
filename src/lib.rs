@@ -330,42 +330,7 @@ impl Media {
     }
 }
 
-/// An audio player owned by the application rather than by a window.
-/// Commands and readback use the same signals and triggers as the visual media piece.
-pub struct AudioService {
-    resource: day_core::ServiceResource,
-}
-
-impl day_core::ApplicationService for AudioService {
-    fn shutdown(&self) {
-        if let Some(node) = self.resource.node() {
-            with_tree(|tree| tree.patch(node, Box::new(MediaPatch::Stop), false));
-        }
-        self.resource.close();
-    }
-}
-
 impl Media {
-    /// Start an application-owned audio service. Call once during application setup.
-    /// This disables video and inline controls. OS background privileges and media-session
-    /// integration are separate from the resource's lifetime.
-    pub fn start_audio(mut self) -> std::rc::Rc<AudioService> {
-        self.audio_only = true;
-        self.controls = false;
-        day_core::application_service(move || {
-            let mut resource = None;
-            self.mount(|props| {
-                let native = day_core::ServiceResource::new(KIND, props);
-                let node = native.node().expect("new audio resource");
-                resource = Some(native);
-                node
-            });
-            AudioService {
-                resource: resource.expect("audio resource was created"),
-            }
-        })
-    }
-
     fn mount(self, create: impl FnOnce(&MediaProps) -> RNode) -> RNode {
         let Media {
             url,
