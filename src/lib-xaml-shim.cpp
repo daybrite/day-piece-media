@@ -1,11 +1,12 @@
 // Copyright © The Daybrite Project
 // SPDX-License-Identifier: MPL-2.0
 
-// The media piece's OWN C++/WinRT shim — parallel to src/lib-qt-shim.cpp. day-xaml hosts the UWP
-// system XAML (winrt::Windows::UI::Xaml, from the base Windows SDK — no WinAppSDK), so the matching
+// The media piece's C++/WinRT shim, parallel to src/lib-qt-shim.cpp. day-xaml hosts the UWP
+// system XAML (winrt::Windows::UI::Xaml, from the base Windows SDK, not WinAppSDK), so the matching
 // player is Windows.UI.Xaml.Controls.MediaPlayerElement backed by a Windows.Media.Playback
-// MediaPlayer. The element is boxed into a day handle via the `day_xaml_box`/`day_xaml_unbox` seam
-// day-xaml-sys exports (zero edits to day's toolkit crates), exactly like the picker/webview shims.
+// MediaPlayer. The element is boxed into a day handle via the `day_xaml_box`/`day_xaml_unbox`
+// functions day-xaml-sys exports (no edits to day's toolkit crates), exactly like the
+// picker/webview shims.
 //
 // Playback state goes back through one file-static callback (day_media_xaml_set_state_cb), fed by
 // the player's PlaybackSession.PlaybackStateChanged, MediaEnded, and MediaFailed events, as the
@@ -38,7 +39,7 @@ namespace WUXC = winrt::Windows::UI::Xaml::Controls;
 namespace WMC = winrt::Windows::Media::Core;
 namespace WMP = winrt::Windows::Media::Playback;
 
-// The boxing seam, exported by day-xaml-sys (already linked into the app).
+// The boxing functions, exported by day-xaml-sys (already linked into the app).
 extern "C" void *day_xaml_box(void *iinspectable_abi);
 extern "C" void *day_xaml_unbox(void *handle);
 
@@ -176,7 +177,7 @@ void *day_media_xaml_new(uint64_t id, const char *url, int autoplay, int looping
         mpe.SetMediaPlayer(player);
         handle = day_xaml_box(winrt::get_abi(mpe));
     } catch (...) {
-        // Any unexpected failure — degrade to a label so the app still runs and screenshots.
+        // On any unexpected failure, degrade to a label so the app still runs and screenshots.
         WUXC::TextBlock tb;
         tb.Text(hs(url ? url : ""));
         handle = day_xaml_box(winrt::get_abi(tb));

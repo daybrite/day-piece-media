@@ -1,9 +1,9 @@
 // Copyright © The Daybrite Project
 // SPDX-License-Identifier: MPL-2.0
 
-// The day-piece-media crate's Android backend — bundled here and folded into the app's Gradle
-// build via [package.metadata.day.android], with ZERO edits to day-android. It uses only
-// day-android's PUBLIC Java surface: DayBridge.ctx (the Context) and DayBridge.nativeOnEvent (the
+// The day-piece-media crate's Android backend, bundled here and folded into the app's Gradle
+// build via [package.metadata.day.android], with no edits to day-android. It uses only
+// day-android's public Java surface: DayBridge.ctx (the Context) and DayBridge.nativeOnEvent (the
 // event trampoline). android.widget.VideoView + MediaController and android.media.MediaPlayer are
 // framework classes, so the piece adds no Gradle dependencies; it declares the INTERNET permission
 // in Cargo.toml for network sources, which `day build` merges into the app manifest. See
@@ -75,7 +75,7 @@ public final class DayMedia {
     private static final Map<View, Live> LIVE = new WeakHashMap<>();
 
     /** Where a source is opened and an old player torn down. `setDataSource` on an http URI
-     *  resolves and connects BEFORE returning, and `reset`/`release` wait on the same socket:
+     *  resolves and connects before returning, and `reset`/`release` wait on the same socket:
      *  on the UI thread either one is an ANR on a slow network. The player itself is created
      *  on the UI thread, so its listeners still run there. */
     private static final ExecutorService IO = Executors.newSingleThreadExecutor();
@@ -169,7 +169,7 @@ public final class DayMedia {
             }
         });
         if (url != null && !url.isEmpty()) {
-            // Uri.parse handles file paths AND http(s)/content URIs (setVideoPath is the same call).
+            // Uri.parse handles file paths and http(s)/content URIs (setVideoPath is the same call).
             live.report(LOADING, "");
             video.setVideoURI(Uri.parse(url));
             if (autoplay) {

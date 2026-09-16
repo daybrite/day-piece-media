@@ -1,26 +1,27 @@
 // Copyright © The Daybrite Project
 // SPDX-License-Identifier: MPL-2.0
 
-//! day-piece-media — an EXTERNAL Day Piece (DESIGN.md §15) wrapping each toolkit's NATIVE media
+//! day-piece-media: an external Day Piece (DESIGN.md §15) wrapping each toolkit's native media
 //! player: AVPlayerView on AppKit, AVPlayerViewController on UIKit, QMediaPlayer + QVideoWidget on
 //! Qt, `android.widget.VideoView` (or a bare `MediaPlayer` for sound) on Android, GtkVideo on GTK,
 //! MediaPlayerElement on XAML, `<video>`/`<audio>` on the web, and an ArkTS `Video` / `AVPlayer` on
 //! HarmonyOS. One Rust API registered link-time into each backend's renderer slice without touching
-//! day. Like the webview it carries both a front-end AND its own native backends — including an
+//! day. Like the webview it carries both a front-end and its native backends, including an
 //! Android manifest permission contribution (INTERNET) and an iOS framework contribution (AVKit +
 //! AVFoundation), see docs/extending.md.
 //!
 //! The player is a growing leaf that fills its space (constrain it with `.frame(w, h)`), unless it
-//! is `.audio_only()`: a sound-only player draws nothing and measures ZERO, so a radio app can drop
+//! is `.audio_only()`: a sound-only player draws nothing and measures zero, so a radio app can drop
 //! it anywhere in its tree and build its own now-playing UI around it. The `url` source accepts a
-//! plain string, a `Signal<String>`, or a closure, and may name a local file path OR an http(s)/file
-//! URL — every backend's loader takes both. Configure playback at build with `.autoplay(bool)` /
-//! `.looping(bool)` / `.muted(bool)` / `.controls(bool)`; transport is imperative and modeled with
-//! `Copy` `Trigger`s — `.play()` / `.pause()` / `.stop()` drive playback and `.load()` re-reads the
-//! bound url (then plays) — each `watch`ed to a `MediaPatch`. `.volume(…)` is a tracked fraction
-//! (a constant, a `Signal<f64>`, or a closure) patched through as it changes.
+//! plain string, a `Signal<String>`, or a closure, and may name a local file path or an
+//! http(s)/file URL; every backend's loader takes both. Configure playback at build with
+//! `.autoplay(bool)` / `.looping(bool)` / `.muted(bool)` / `.controls(bool)`; transport is
+//! imperative and modeled with `Copy` `Trigger`s: `.play()` / `.pause()` / `.stop()` drive playback
+//! and `.load()` re-reads the bound url (then plays), each `watch`ed to a `MediaPatch`.
+//! `.volume(…)` is a tracked fraction (a constant, a `Signal<f64>`, or a closure) patched through
+//! as it changes.
 //!
-//! Playback state comes BACK through `.state(signal)`: every arm reports what its native player is
+//! Playback state comes back through `.state(signal)`: every arm reports what its native player is
 //! doing (loading, playing, paused, ended, failed) on the piece's `Event::Custom` channel, and the
 //! front-end writes it into the bound `Signal<PlaybackState>`. That is the readback docs/media.md
 //! reserved the channel for: native chrome, the network, and the app's own triggers all move the
@@ -55,7 +56,7 @@ pub struct MediaProps {
     pub muted: bool,
     /// Show the toolkit's native transport chrome where it has one (default true).
     pub controls: bool,
-    /// Sound only (default false): no picture, no chrome, and no size — the leaf measures zero.
+    /// Sound only (default false): the leaf draws nothing, has no chrome, and measures zero.
     /// Each arm builds the toolkit's bare audio player rather than its video view.
     pub audio_only: bool,
     /// Output volume, `0.0` (silent) to `1.0` (full) (default 1.0).
@@ -79,13 +80,13 @@ impl Default for MediaProps {
 /// Sparse imperative commands sent to the native player after creation.
 #[derive(Clone, Debug, PartialEq)]
 pub enum MediaPatch {
-    /// Load a url (from `.load()` — re-reads the bound source) and start playing it.
+    /// Load a url (from `.load()`, which re-reads the bound source) and start playing it.
     Load(String),
     /// Resume/start playback (from `.play()`).
     Play,
     /// Pause playback (from `.pause()`).
     Pause,
-    /// Stop playback and DROP the source (from `.stop()`): a paused live stream keeps its
+    /// Stop playback and drop the source (from `.stop()`): a paused live stream keeps its
     /// connection open and its buffer filling, a stopped one lets both go. The next `Load`
     /// starts afresh.
     Stop,
@@ -102,7 +103,7 @@ pub enum PlaybackState {
     /// No source, or the source was stopped.
     #[default]
     Idle,
-    /// A source is set and the player is connecting or buffering — nothing audible yet.
+    /// A source is set and the player is connecting or buffering; nothing audible yet.
     Loading,
     Playing,
     Paused,
@@ -145,9 +146,9 @@ pub mod report {
     pub const PAUSED: i32 = 3;
     pub const ENDED: i32 = 4;
     pub const ERROR: i32 = 5;
-    /// Not a state: the stream said what it is playing. `text` is the raw in-band value —
-    /// an ICY `StreamTitle` (`Artist - Title`), or the ID3/timed fields packed
-    /// `title\u{1f}artist\u{1f}album` — which [`StreamMetadata::from_report`] parses.
+    /// Not a state: the stream said what it is playing. `text` is the raw in-band value,
+    /// an ICY `StreamTitle` (`Artist - Title`) or the ID3/timed fields packed
+    /// `title\u{1f}artist\u{1f}album`, which [`StreamMetadata::from_report`] parses.
     pub const METADATA: i32 = 6;
 }
 
@@ -232,12 +233,12 @@ pub struct Media {
     metadata: Option<Signal<Option<StreamMetadata>>>,
 }
 
-/// `media(url)` — a native audio/video player for `url` (a string, `Signal<String>`, or closure;
+/// `media(url)`: a native audio/video player for `url` (a string, `Signal<String>`, or closure;
 /// a file path or an http(s) URL). The initial value loads on creation and autoplays by default;
 /// call `.load(trigger)` and fire the trigger to (re)load whatever `url` currently holds.
 pub fn media<M>(url: impl IntoText<M>) -> Media {
     // Self-register the web renderer. wasm has no link-time renderer slice, and a constructor is
-    // the earliest point the piece is known to be in play — always before its node is realized.
+    // the earliest point the piece is known to be in play, always before its node is realized.
     #[cfg(all(feature = "dom", target_arch = "wasm32"))]
     dom_impl::register();
     Media {
@@ -274,18 +275,18 @@ impl Media {
         self
     }
     /// Show the toolkit's native transport chrome where it has one (default true). Qt has no free
-    /// chrome (use triggers) and GtkVideo's overlay controls cannot be hidden — see docs/media.md.
+    /// chrome (use triggers) and GtkVideo's overlay controls cannot be hidden; see docs/media.md.
     pub fn controls(mut self, controls: bool) -> Self {
         self.controls = controls;
         self
     }
-    /// Sound only: no picture, no chrome, and no size. The piece measures zero, so it can sit
+    /// Sound only: the piece draws nothing, has no chrome, and measures zero, so it can sit
     /// anywhere in the tree while the app draws its own transport (a radio's now-playing bar).
     pub fn audio_only(mut self, audio_only: bool) -> Self {
         self.audio_only = audio_only;
         self
     }
-    /// Output volume, `0.0..=1.0` — a constant, a `Signal<f64>`, or a closure. A tracked source
+    /// Output volume, `0.0..=1.0`: a constant, a `Signal<f64>`, or a closure. A tracked source
     /// patches the player whenever it changes, so one `slider` binding drives it.
     pub fn volume<M>(mut self, volume: impl IntoFraction<M>) -> Self {
         self.volume = Some(volume.into_fraction());
@@ -312,7 +313,7 @@ impl Media {
         self
     }
     /// Where the piece writes what the native player is doing. Written on every change the
-    /// toolkit reports, whoever caused it — a trigger, the native chrome, or the network.
+    /// toolkit reports, whoever caused it: a trigger, the native chrome, or the network.
     pub fn state(mut self, state: Signal<PlaybackState>) -> Self {
         self.state = Some(state);
         self
@@ -322,7 +323,7 @@ impl Media {
     /// own metadata (AVFoundation's timed metadata on macOS and iOS: ICY `StreamTitle` and
     /// HLS ID3 alike) it arrives from there; elsewhere the piece asks the stream itself, on a
     /// second, short-lived connection with `Icy-MetaData: 1` every [`ICY_PROBE_SECS`]
-    /// seconds — the same header the players send, read only as far as the first metadata
+    /// seconds (the same header the players send), read only as far as the first metadata
     /// block. Not available on the web (a page cannot read a cross-origin stream).
     pub fn metadata(mut self, metadata: Signal<Option<StreamMetadata>>) -> Self {
         self.metadata = Some(metadata);
@@ -426,7 +427,7 @@ impl Media {
         }
         // The readback rail: every arm reports its player's state on this node's Custom channel.
         // A cross-boundary Custom (JNI, C-ABI, ArkTS, wasm) carries only `num`/`text`, so the
-        // code is the discriminator — never the tag.
+        // code is the discriminator, never the tag.
         cx.on(node, move |ev| {
             if let Event::Custom { num, text, .. } = ev {
                 if *num as i32 == report::METADATA {
@@ -452,7 +453,7 @@ impl Media {
 }
 
 // ---------------------------------------------------------------------------
-// Per-toolkit native renderers — one file per backend. Each module registers a `Renderer`
+// Per-toolkit native renderers, one file per backend. Each module registers a `Renderer`
 // link-time into its backend's `RENDERERS` slice; `#[cfg]` gates each to its feature + target, and
 // `#[path]` keeps the files grouped next to lib.rs. xaml/mock register nothing (the media kind
 // falls back to day's placeholder leaf there).
@@ -482,13 +483,13 @@ pub const ICY_PROBE_SECS: u32 = 20;
 #[path = "icy.rs"]
 mod icy;
 
-// GtkVideo is core GTK, so this compiles on every gtk host — but playback needs a gstreamer media
+// GtkVideo is core GTK, so this compiles on every gtk host, but playback needs a gstreamer media
 // backend in the gtk4 build (Linux default; Homebrew gtk4 has none, so macos-gtk shows GtkVideo's
-// own error UI — see Cargo.toml + docs/media.md).
+// own error UI; see Cargo.toml + docs/media.md).
 
 // --- Typed builders, forwarded through `Decorated` (docs/api-style.md) ---
 
-/// [`Media`]'s own builders, reachable THROUGH a decoration (§5.2): `day_pieces::Decorated` forwards them
+/// [`Media`]'s own builders, reachable through a decoration (§5.2): `day_pieces::Decorated` forwards them
 /// to the piece it wraps, so generic modifiers and typed ones chain in any order.
 pub trait MediaBuilder: Sized {
     fn autoplay(self, autoplay: bool) -> Self;
@@ -592,7 +593,7 @@ mod tests {
     use day_reactive::{Signal, flush_sync};
     use day_spec::{Size, WindowOptions};
 
-    // Building + driving the piece must never panic — even with no native renderer registered
+    // Building + driving the piece must never panic, even with no native renderer registered
     // (the mock toolkit realizes unknown kinds as plain widgets and ignores unknown patches,
     // exactly like a backend built without this piece's feature).
     #[test]

@@ -9,40 +9,41 @@ repository = "https://github.com/daybrite/day-piece-media"
 license = "MPL-2.0"
 build = "build.rs"
 
-# A standalone Day Piece wrapping each toolkit's NATIVE media player (AVPlayerView on AppKit, a
+# A standalone Day Piece wrapping each toolkit's native media player (AVPlayerView on AppKit, a
 # hand-rolled AVPlayerViewController on UIKit, QMediaPlayer + QVideoWidget on Qt,
-# android.widget.VideoView on Android, GtkVideo on GTK). Like `day-piece-webview`, it carries BOTH
+# android.widget.VideoView on Android, GtkVideo on GTK). Like `day-piece-webview`, it carries both
 # its cross-platform front-end (Rust) and its per-toolkit backend (objc2 / C++ shim / Android Java /
 # gtk-rs) without touching any core day crate. See docs/extending.md + docs/media.md.
 
 [features]
 appkit = ["dep:day-appkit", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation", "dep:objc2-core-media", "dep:objc2-av-kit", "dep:objc2-av-foundation", "dep:dispatch2"]
-# GtkVideo is core GTK, so the gtk feature compiles EVERYWHERE — but actual playback needs gtk4
+# GtkVideo is core GTK, so the gtk feature compiles everywhere, but actual playback needs gtk4
 # built with a gstreamer media backend (Debian/Fedora default). Homebrew's gtk4 ships none, so on
 # macos-gtk GtkVideo shows its own "no media backend" error UI (the webkitgtk caveat class again).
 gtk = ["dep:day-gtk", "dep:gtk4"]
 qt = ["dep:day-qt"]                 # + build.rs compiles src/lib-qt-shim.cpp, linking Qt6MultimediaWidgets when present (else a URL-label fallback)
 # objc2-av-kit 0.3 binds AVPlayerView for macOS only, so UIKit hand-rolls AVPlayerViewController
-# via extern_class!/msg_send! (the WKWebView-on-iOS situation) — see [package.metadata.day.ios].
+# via extern_class!/msg_send! (the WKWebView-on-iOS situation); see [package.metadata.day.ios].
 uikit = ["dep:day-uikit", "dep:objc2", "dep:objc2-ui-kit", "dep:objc2-foundation", "dep:objc2-core-media", "dep:objc2-av-foundation", "dep:dispatch2"]
 mdc = ["dep:day-android"]        # + [package.metadata.day.android]
-# HarmonyOS: no native node kind to construct, so the piece ships its OWN ArkTS (platform/harmony/ets/Index.ets)
-# — an ArkUI `Video` component for pictures, an AVPlayer for sound only — staged into the app's
-# hvigor project through [package.metadata.day.ohos], the same route the webview takes.
+# HarmonyOS: no native node kind to construct, so the piece ships its ArkTS
+# (platform/harmony/ets/Index.ets, an ArkUI `Video` component for pictures and an AVPlayer for
+# sound only), staged into the app's hvigor project through [package.metadata.day.ohos], the same
+# route the webview takes.
 arkui = ["dep:day-arkui"]        # + [package.metadata.day.ohos]
 # XAML: build.rs compiles src/lib-xaml-shim.cpp (a MediaPlayerElement boxed via day-xaml-sys's
-# day_xaml_box seam, like the picker/webview xaml pieces). mock has no renderer — its feature
+# day_xaml_box functions, like the picker/webview xaml pieces). mock has no renderer. Its feature
 # exists so apps can enable `day-piece-media/mock` uniformly; the media kind then falls back to
 # day's placeholder leaf.
 xaml = ["dep:day-xaml", "dep:day-xaml-sys"]
-# Web: a plain <video>. Registered at RUNTIME rather than link-time — wasm has no `linkme`
+# Web: a plain <video>. Registered at runtime rather than link-time, because wasm has no `linkme`
 # distributed slice (see lib-dom.rs), so the piece registers itself from its constructor.
 dom = ["dep:day-dom"]
 mock = []
 
 # Backends this piece carries a native-renderer [features] entry for. `day` unions `<pkg>/<backend>`
-# into an app build (Tier A.2), so an app depends on this piece with a plain `{ workspace = true }` —
-# no per-backend feature fan-out in its own Cargo.toml.
+# into an app build (Tier A.2), so an app depends on this piece with a plain `{ workspace = true }`,
+# with no per-backend feature fan-out in its Cargo.toml.
 [package.metadata.day]
 compat = "0.4"
 
@@ -90,18 +91,18 @@ cc = "1"
 day-mock = { git = "https://github.com/daybrite/day.git" }
 
 # Standalone-piece Android contribution (docs/extending.md). The day CLI reads this from
-# `cargo metadata` and folds it into the app's Gradle build — the piece carries its own backend
-# Java AND declares the Android permissions it needs, without touching day-android or the scaffold.
+# `cargo metadata` and folds it into the app's Gradle build; the piece carries its backend
+# Java and declares the Android permissions it needs, without touching day-android or the scaffold.
 [package.metadata.day.android]
 # Java/Kotlin sources, relative to this crate root: dirs, or single files linked in by package.
 java = ["src/DayMedia.java"]
 # Gradle dependency coordinates added to the app module. android.widget.VideoView + MediaController
 # are framework widgets, so no extra dependency is required (androidx.media3/ExoPlayer is the later
-# upgrade for HLS/DASH robustness, via this same key).
+# upgrade for reliable HLS/DASH playback, via this same key).
 gradle-dependencies = []
 # Extra Maven repositories (URLs) for dependencies not on google()/mavenCentral().
 gradle-repositories = []
-# Android manifest <uses-permission>s the piece needs — merged into the app manifest by `day build`
+# Android manifest <uses-permission>s the piece needs, merged into the app manifest by `day build`
 # (network media sources need INTERNET; local files need nothing).
 permissions = ["android.permission.INTERNET"]
 
@@ -111,7 +112,7 @@ permissions = ["android.permission.INTERNET"]
 ets = ["platform/harmony/ets"]
 
 # --- iOS backend contribution (docs/extending.md) ---
-# The iOS AVPlayerViewController is hand-rolled in Rust (objc2), so there's no Swift shim — but its
+# The iOS AVPlayerViewController is hand-rolled in Rust (objc2), so there's no Swift shim, but its
 # ObjC class lives in AVKit.framework (and AVPlayer in AVFoundation.framework), which the app must
 # link. Declaring them here links them via the generated DayPieces SwiftPM package.
 [package.metadata.day.ios]
@@ -119,7 +120,7 @@ ets = ["platform/harmony/ets"]
 # link is ignored by xcodebuild, so the app links it here too.
 # AVFAudio carries AVAudioSession, which the UIKit arm puts in the `playback` category so sound
 # keeps going with the ring switch on and (with the app's `UIBackgroundModes` audio entry) in the
-# background — the audio session is per process, and a media player is what needs one.
+# background; the audio session is per process, and a media player is what needs one.
 frameworks = ["AVKit", "AVFoundation", "CoreMedia", "AVFAudio"]
 
 # --- macOS backend contribution ---

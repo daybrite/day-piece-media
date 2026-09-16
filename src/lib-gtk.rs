@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: MPL-2.0
 
 // ---------------------------------------------------------------------------
-// GTK: gtk4::Video — a core GTK widget (compiles everywhere) backed by GtkMediaFile, which needs a
-// gstreamer media backend in the gtk4 BUILD for actual playback. Linux distro packages ship one
+// GTK: gtk4::Video, a core GTK widget (compiles everywhere) backed by GtkMediaFile, which needs a
+// gstreamer media backend in the gtk4 build for actual playback. Linux distro packages ship one
 // (-Dmedia-gstreamer=enabled); Homebrew's gtk4 ships none, so on macos-gtk GtkVideo shows its own
-// "no media backend" error UI (the same caveat class as webkitgtk — see docs/media.md). GtkVideo's
+// "no media backend" error UI (the same caveat class as webkitgtk; see docs/media.md). GtkVideo's
 // overlay controls are always on; `.controls(false)` is a no-op here.
 //
 // A sound-only player needs no Video widget at all: GtkMediaStream plays on its own, so the leaf
@@ -217,8 +217,8 @@ fn release(_backend: &mut Gtk, h: &gtk4::Widget) {
     set_stream(h, None);
 }
 
-// glib is what the widget-data helpers above are generic over; naming it keeps the import honest
-// for a reader tracing `set_data`/`data` to their trait.
+// glib is what the widget-data helpers above are generic over; naming it lets a reader trace
+// `set_data`/`data` to their trait.
 #[allow(unused_imports)]
 use glib::object::ObjectExt as _;
 

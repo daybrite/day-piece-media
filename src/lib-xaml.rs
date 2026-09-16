@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 // XAML: this crate's shim (src/lib-xaml-shim.cpp) wrapping a Windows.UI.Xaml.Controls
 // MediaPlayerElement, boxed into a day handle via day-xaml-sys's `day_xaml_box`/`day_xaml_unbox`
-// seam (like the picker/webview xaml pieces). MediaPlayerElement is core system XAML — no
+// functions (like the picker/webview xaml pieces). MediaPlayerElement is core system XAML: no
 // availability caveat like the EdgeHTML WebView. `.controls` maps to AreTransportControlsEnabled;
 // looping/muted/autoplay/volume live on the backing MediaPlayer. A sound-only player is a
 // collapsed element of no size. Playback state comes back through one file-static C callback the

@@ -1,7 +1,7 @@
 // Copyright © The Daybrite Project
 // SPDX-License-Identifier: MPL-2.0
 
-// day-piece-media — the HarmonyOS half of the piece (docs/extending.md, docs/media.md).
+// day-piece-media: the HarmonyOS half of the piece (docs/extending.md, docs/media.md).
 //
 // The ArkUI C node API has no video node kind, so the player is declared here in ArkTS: a `Video`
 // component for pictures (built into a BuilderNode and handed to Day as a FrameNode the native
@@ -12,7 +12,7 @@
 // Commands arrive as the piece's own vocabulary ('load' | 'play' | 'pause' | 'stop' | 'volume').
 // Playback state goes back through `pieceEvent` with the piece's report codes as `num` (0 idle,
 // 1 loading, 2 playing, 3 paused, 4 ended, 5 error), which reaches the Rust front-end as an
-// `Event::Custom` — the same channel the Android renderer uses.
+// `Event::Custom`, the same channel the Android renderer uses.
 
 import { BuilderNode, FrameNode, UIContext } from '@kit.ArkUI';
 import { media } from '@kit.MediaKit';

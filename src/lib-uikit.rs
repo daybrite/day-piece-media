@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 // ---------------------------------------------------------------------------
-// UIKit: AVPlayerViewController (AVKit) fronting an AVPlayer (AVFoundation) — the same player as
+// UIKit: AVPlayerViewController (AVKit) fronting an AVPlayer (AVFoundation): the same player as
 // AppKit, but objc2-av-kit 0.3 only generates the macOS (AVPlayerView) binding, so here we
 // hand-roll the view controller via `extern_class!` + `msg_send!` (exactly how the webview
 // hand-rolls WKWebView on iOS). Its `view` is the leaf UIView day-uikit manages; the controller
@@ -13,8 +13,8 @@
 // failed-to-play notifications) is the same shape as lib-appkit.rs's and reports the same codes.
 //
 // The audio session: the first player puts the process's AVAudioSession in the `playback`
-// category and activates it. Without that, iOS treats the app's sound as ambient — silenced by
-// the ring switch and stopped the moment the app leaves the foreground — which no media player
+// category and activates it. Without that, iOS treats the app's sound as ambient (silenced by
+// the ring switch and stopped the moment the app leaves the foreground), which no media player
 // wants. Background playback additionally needs the app's `UIBackgroundModes` `audio` entry.
 // ---------------------------------------------------------------------------
 
@@ -49,11 +49,11 @@ use objc2_foundation::{
 };
 use objc2_ui_kit::{UIResponder, UIView, UIViewController};
 
-// AVPlayerViewController lives in AVKit.framework, which must be LINKED or
-// `objc_getClass("AVPlayerViewController")` returns nil and `alloc` aborts (SIGABRT) — declared
-// via this crate's `[package.metadata.day.ios].frameworks`, which the generated DayPieces SwiftPM
-// package links into the app (the framework-contribution seam). AVAudioSession lives in AVFAudio,
-// declared the same way.
+// AVPlayerViewController lives in AVKit.framework, which must be linked or
+// `objc_getClass("AVPlayerViewController")` returns nil and `alloc` aborts (SIGABRT). It is
+// declared via this crate's `[package.metadata.day.ios].frameworks`, which the generated DayPieces
+// SwiftPM package links into the app (the framework contribution). AVAudioSession lives in
+// AVFAudio, declared the same way.
 
 // The iOS AVPlayerViewController (a UIViewController subclass). We only need a handful of methods,
 // called via msg_send!.
@@ -68,7 +68,7 @@ extern_class!(
 const KEY_PATHS: [&str; 3] = [
     "timeControlStatus",
     "currentItem.status",
-    // Observing it is what makes AVFoundation PROCESS timed metadata at all ("AVPlayerItem may
+    // Observing it is what makes AVFoundation process timed metadata at all ("AVPlayerItem may
     // omit the processing of timed metadata when no observer of this property is
     // registered"); the ICY block of an Icecast stream lands here.
     "currentItem.timedMetadata",
@@ -90,8 +90,8 @@ define_class!(
     unsafe impl NSObjectProtocol for MediaObserver {}
 
     impl MediaObserver {
-        // Fired when ANY player item plays to its end (registered with object: nil so `.load()`
-        // swaps stay covered) — act only when it is OUR player's current item.
+        // Fired when any player item plays to its end (registered with object: nil so `.load()`
+        // swaps stay covered); act only when it is the observed player's current item.
         #[unsafe(method(itemDidPlayToEnd:))]
         fn item_did_play_to_end(&self, note: *mut AnyObject) {
             if !self.is_ours(note) {
@@ -185,7 +185,7 @@ impl MediaObserver {
         this
     }
 
-    /// Deregister everything BEFORE the observer drops: a center or a KVO registration left
+    /// Deregister everything before the observer drops: a center or a KVO registration left
     /// pointing at a freed object messages garbage on the next change.
     fn detach(&self) {
         unsafe {
@@ -220,9 +220,9 @@ impl MediaObserver {
 
 // ---------------------------------------------------------------------------
 // The stream's own "now playing" (docs/media.md): an AVPlayerItemMetadataOutput on every item,
-// delivering timed metadata to this delegate on the main queue — the ICY `StreamTitle` an
+// delivering timed metadata to this delegate on the main queue: the ICY `StreamTitle` an
 // Icecast server interleaves into an MP3/AAC stream (AVFoundation asks for it and decodes it),
-// and the ID3 frames of an HLS stream — reported as one `report::METADATA` event.
+// and the ID3 frames of an HLS stream, reported as one `report::METADATA` event.
 // ---------------------------------------------------------------------------
 
 struct MetadataIvars {
@@ -403,7 +403,7 @@ struct Live {
 }
 
 day_core::tls_group! {
-    // Keep each player (and controller) alive as long as its view — the update path finds the
+    // Keep each player (and controller) alive as long as its view; the update path finds the
     // player by the leaf view's pointer.
     static LIVE: RefCell<HashMap<usize, Live>> = RefCell::new(HashMap::new());
 }
@@ -460,7 +460,7 @@ fn make(_backend: &mut Uikit, p: &MediaProps, id: NodeId) -> Retained<UIView> {
             let view: Retained<UIView> = unsafe { msg_send![&vc, view] };
             (view, Some(vc))
         };
-    // Observe BEFORE loading, so the first item's status lands in the signal too.
+    // Observe before loading, so the first item's status lands in the signal too.
     let observer = MediaObserver::new(mtm, player.clone(), id, p.looping);
     let metadata = MetadataDelegate::new(id);
     LIVE.with(|m| {
@@ -522,13 +522,13 @@ fn measure(backend: &mut Uikit, h: &Retained<UIView>, proposal: Proposal) -> Siz
 /// away.
 ///
 /// Without this the map grows one retained player (and controller) per realized media view,
-/// and — worse — its key is the view's ADDRESS, which the allocator reuses: a later view landing
+/// and, worse, its key is the view's address, which the allocator reuses: a later view landing
 /// on a freed address would inherit the dead entry and drive the wrong player.
 fn release(_backend: &mut Uikit, h: &Retained<UIView>) {
     let Some(live) = LIVE.with(|m| m.borrow_mut().remove(&key_of(h))) else {
         return;
     };
-    // Pause before the drop below releases the player — teardown, not deallocation order,
+    // Pause before the drop below releases the player: teardown, not deallocation order,
     // should be what silences it.
     unsafe { live.player.pause() };
     live.observer.detach();

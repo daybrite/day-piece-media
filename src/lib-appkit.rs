@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: MPL-2.0
 
 // ---------------------------------------------------------------------------
-// AppKit: AVPlayerView (AVKit) fronting an AVPlayer (AVFoundation) — native transport chrome for
-// free via `controlsStyle`. A sound-only player skips the AVPlayerView: the leaf is an empty,
+// AppKit: AVPlayerView (AVKit) fronting an AVPlayer (AVFoundation), with native transport chrome
+// via `controlsStyle`. A sound-only player skips the AVPlayerView: the leaf is an empty,
 // hidden NSView of no size, and the AVPlayer behind it lives in this arm's own table.
 //
-// One NSObject per player observes what the player does — `timeControlStatus` and the current
-// item's `status` over KVO, plus the played-to-end and failed-to-play notifications — and reports
+// One NSObject per player observes what the player does (`timeControlStatus` and the current
+// item's `status` over KVO, plus the played-to-end and failed-to-play notifications) and reports
 // it on the node's Custom channel as a `PlaybackState`; the same observer seeks a looping player
 // back to zero. It is retained here for the view's lifetime (neither KVO nor the notification
 // center retains observers) and deregistered in `release`.
@@ -47,7 +47,7 @@ use objc2_foundation::{
 const KEY_PATHS: [&str; 3] = [
     "timeControlStatus",
     "currentItem.status",
-    // Observing it is what makes AVFoundation PROCESS timed metadata at all ("AVPlayerItem may
+    // Observing it is what makes AVFoundation process timed metadata at all ("AVPlayerItem may
     // omit the processing of timed metadata when no observer of this property is
     // registered"); the ICY block of an Icecast stream lands here.
     "currentItem.timedMetadata",
@@ -69,8 +69,8 @@ define_class!(
     unsafe impl NSObjectProtocol for MediaObserver {}
 
     impl MediaObserver {
-        // Fired when ANY player item plays to its end (registered with object: nil so `.load()`
-        // swaps stay covered) — act only when it is OUR player's current item.
+        // Fired when any player item plays to its end (registered with object: nil so `.load()`
+        // swaps stay covered); act only when it is the observed player's current item.
         #[unsafe(method(itemDidPlayToEnd:))]
         fn item_did_play_to_end(&self, note: *mut AnyObject) {
             if !self.is_ours(note) {
@@ -97,7 +97,7 @@ define_class!(
             self.report(report::ERROR, failure_message(note));
         }
 
-        // KVO: either key path moved — re-derive the whole state rather than reading the change
+        // KVO: either key path moved. Re-derive the whole state rather than reading the change
         // dictionary, since the answer depends on both.
         #[unsafe(method(observeValueForKeyPath:ofObject:change:context:))]
         fn observe_value(
@@ -163,7 +163,7 @@ impl MediaObserver {
         this
     }
 
-    /// Deregister everything BEFORE the observer drops: a center or a KVO registration left
+    /// Deregister everything before the observer drops: a center or a KVO registration left
     /// pointing at a freed object messages garbage on the next change.
     fn detach(&self) {
         unsafe {
@@ -199,9 +199,9 @@ impl MediaObserver {
 
 // ---------------------------------------------------------------------------
 // The stream's own "now playing" (docs/media.md): an AVPlayerItemMetadataOutput on every item,
-// delivering timed metadata to this delegate on the main queue — the ICY `StreamTitle` an
+// delivering timed metadata to this delegate on the main queue: the ICY `StreamTitle` an
 // Icecast server interleaves into an MP3/AAC stream (AVFoundation asks for it and decodes it),
-// and the ID3 frames of an HLS stream — reported as one `report::METADATA` event.
+// and the ID3 frames of an HLS stream, reported as one `report::METADATA` event.
 // ---------------------------------------------------------------------------
 
 struct MetadataIvars {
@@ -414,7 +414,7 @@ fn make(backend: &mut AppKit, p: &MediaProps, id: NodeId) -> Retained<NSView> {
         }
         Retained::from(<AVPlayerView as AsRef<NSView>>::as_ref(&view))
     };
-    // Observe BEFORE loading, so the first item's status lands in the signal too.
+    // Observe before loading, so the first item's status lands in the signal too.
     let observer = MediaObserver::new(mtm, player.clone(), id, p.looping);
     let metadata = MetadataDelegate::new(id);
     LIVE.with(|m| {
@@ -472,14 +472,14 @@ fn measure(backend: &mut AppKit, h: &Retained<NSView>, proposal: Proposal) -> Si
 
 /// Stop playback and drop the retained player + observer when the view goes away.
 ///
-/// Without this the table grows by one entry per realized media view, and — worse — its key
-/// is the view's ADDRESS, which the allocator reuses: a later view landing on a freed address
+/// Without this the table grows by one entry per realized media view, and, worse, its key
+/// is the view's address, which the allocator reuses: a later view landing on a freed address
 /// would inherit the dead entry's player and drive the wrong one.
 fn release(_backend: &mut AppKit, h: &Retained<NSView>) {
     let Some(live) = LIVE.with(|m| m.borrow_mut().remove(&key_of(h))) else {
         return;
     };
-    // Pause before the drop below releases the player — teardown, not deallocation order,
+    // Pause before the drop below releases the player: teardown, not deallocation order,
     // should be what silences it.
     unsafe { live.player.pause() };
     live.observer.detach();

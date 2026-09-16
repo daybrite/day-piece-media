@@ -3,10 +3,10 @@
 
 // ---------------------------------------------------------------------------
 // Qt: this crate's shim (src/lib-qt-shim.cpp) wrapping QMediaPlayer + QAudioOutput (+ a
-// QVideoWidget for pictures) behind a flat C ABI. build.rs compiles it AND links
+// QVideoWidget for pictures) behind a flat C ABI. build.rs compiles it and links
 // Qt6MultimediaWidgets (which day-qt-sys does not); where that module is absent the shim degrades
 // to a URL label (see the shim's #else). QVideoWidget has no built-in chrome, so `.controls` is a
-// no-op on Qt — drive playback with the `.play()/.pause()` triggers. Playback state comes back
+// no-op on Qt; drive playback with the `.play()/.pause()` triggers. Playback state comes back
 // through one file-static C callback the shim calls from the player's own signals.
 // ---------------------------------------------------------------------------
 

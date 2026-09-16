@@ -3,10 +3,10 @@
 
 // The media piece's own Qt shim behind a flat C ABI. When Qt6MultimediaWidgets is available
 // (build.rs probes pkg-config and defines DAY_MEDIA_QT_MM) this wraps QMediaPlayer + QAudioOutput
-// (+ a QVideoWidget unless the player is sound-only). When it is NOT — some minimal Qt installs —
+// (+ a QVideoWidget unless the player is sound-only). When it is not (some minimal Qt installs),
 // it degrades to a QLabel showing the URL, so the app still builds/launches/screenshots (mirrors
 // day-piece-webview's MSYS2 degrade). The C ABI is identical either way, so lib-qt.rs is
-// unchanged. Note QVideoWidget ships no transport chrome — the piece's `.controls` flag is a
+// unchanged. Note QVideoWidget ships no transport chrome, so the piece's `.controls` flag is a
 // no-op on Qt; playback is driven through day_media_play/pause/stop (the front-end's triggers).
 // `Load` also starts playback, matching the other backends.
 //
@@ -40,7 +40,7 @@ public:
 
     void load(const QString &url) {
         if (player && !url.isEmpty())
-            player->setSource(QUrl::fromUserInput(url)); // handles file paths AND http(s) URLs
+            player->setSource(QUrl::fromUserInput(url)); // handles file paths and http(s) URLs
     }
 
     void report(int code, const QString &text = QString()) {
@@ -161,7 +161,7 @@ int day_media_is_audio_only(void *w) { return static_cast<DayMedia *>(w)->audioO
 
 } // extern "C"
 
-#else // no Qt6MultimediaWidgets — degrade to a URL label (QtWidgets only, already linked by day-qt-sys)
+#else // no Qt6MultimediaWidgets: degrade to a URL label (QtWidgets only, already linked by day-qt-sys)
 
 #include <QLabel>
 

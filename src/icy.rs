@@ -4,7 +4,7 @@
 //! The side probe of a stream's in-band metadata (docs/media.md), for the arms whose native
 //! player keeps it to itself (Android's `MediaPlayer`, GStreamer behind `GtkVideo`, Qt, XAML,
 //! ArkUI). Icecast and Shoutcast servers interleave a `StreamTitle='…';` block into an MP3 or
-//! AAC stream every `icy-metaint` bytes when the client asks with `Icy-MetaData: 1` — which
+//! AAC stream every `icy-metaint` bytes when the client asks with `Icy-MetaData: 1`, which
 //! every player does, and then decodes and discards. This probe asks the same way on a second,
 //! short-lived connection, reads exactly one block (a few kilobytes), hangs up, and comes back
 //! every [`ICY_PROBE_SECS`] seconds. A stream that answers without `icy-metaint` has no such
@@ -262,7 +262,7 @@ mod native {
             return String::new();
         };
         let rest = &text[start + "StreamTitle='".len()..];
-        // The title may itself contain a quote; the field ends at the LAST `';` before the next
+        // The title may itself contain a quote; the field ends at the last `';` before the next
         // field, or at the end of the block.
         let end = rest
             .find("';StreamUrl=")
