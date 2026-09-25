@@ -6,14 +6,18 @@ flow:
   - screenshot: media-ready
   - tap: { id: media-play }
   # Homebrew GTK ships no media backend; its error view is still a supported demo outcome.
-  - assert_text: { id: media-state, key: state_playing, skip_on: [macos-gtk, windows-gtk, windows-qt] }
+  # HarmonyOS plays through ArkUI Video and AVPlayer, but CI's OpenHarmony QEMU image lacks the
+  # media service's file-source plugin (docs/validation.md), so a bundled file never reaches
+  # Playing there and the state reads "playback failed"; the controls still dispatch, the stop
+  # lands on Idle, and the captures show the player's error view.
+  - assert_text: { id: media-state, key: state_playing, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
   - screenshot: media-playing
   - tap: { id: media-pause }
-  - assert_text: { id: media-state, key: state_paused, skip_on: [macos-gtk, windows-gtk, windows-qt] }
+  - assert_text: { id: media-state, key: state_paused, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
   - set_value: { id: media-volume, value: 0 }
   - tap: { id: media-stop }
   - assert_text: { id: media-state, key: state_idle, skip_on: [macos-gtk, windows-gtk, windows-qt] }
   - tap: { id: media-reload }
-  - assert_text: { id: media-state, key: state_playing, skip_on: [macos-gtk, windows-gtk, windows-qt] }
+  - assert_text: { id: media-state, key: state_playing, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
   - tap: { id: media-stop }
   - screenshot: media-stopped

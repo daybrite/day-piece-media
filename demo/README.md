@@ -26,7 +26,7 @@ ffmpeg -f lavfi -i 'testsrc2=size=320x180:rate=24' \
 
 For the locally installed command-line OpenHarmony SDK, the build may need
 `OHOS_BASE_SDK_HOME` set to its versioned SDK root and `NODE_PATH` set to Hvigor's `node_modules`.
-Use `day ohos emulator launch --headless` to start an emulator and select its reported
+Use `day devices boot -p harmony-arkui --headless` to start an emulator and select its reported
 `DAY_OHOS_TARGET` when launching. These are machine-local settings, not package dependencies.
 
 The local OpenHarmony QEMU image lacks `libmedia_plugin_FileFdSource.z.so`. On that image,
