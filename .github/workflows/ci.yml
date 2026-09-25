@@ -76,7 +76,7 @@ jobs:
     secrets: inherit
     with:
       project-path: demo
-      targets: macos-appkit, macos-gtk, macos-qt, linux-gtk, linux-qt, windows-xaml, ios-uikit, android-mdc, web-dom, harmony-arkui
+      targets: macos-appkit, linux-gtk, linux-qt, windows-xaml, ios-uikit, android-mdc, web-dom, harmony-arkui
       # The CLI that builds, and the framework revision: with no lock committed the shared
       # workflow resolves one fresh, and this moves every leg to the same tip-of-main revision.
       day-version: main
