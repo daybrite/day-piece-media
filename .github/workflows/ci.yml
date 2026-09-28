@@ -11,8 +11,11 @@ on:
     # Daily: day's main moves on weeks nobody pushes here.
     - cron: "0 10 * * *"
 
+# The repository's own jobs run this checkout's code with a read-only token. The write grants
+# sit on the job that calls the shared workflow, whose release and Pages jobs alone use them;
+# its build legs, which run this code too, narrow their token to read-only themselves.
 permissions:
-  contents: write # release-asset upload on tag builds
+  contents: read
 
 jobs:
   host:
@@ -72,14 +75,13 @@ jobs:
       - run: cargo clippy --target ${{ matrix.target }} --features ${{ matrix.features }} -- -D warnings
 
   demo:
-    uses: daybrite/actions/.github/workflows/dayapp.yml@main
+    uses: daybrite/actions/.github/workflows/dayapp.yml@v1
+    permissions:
+      contents: write # release-asset upload on tag builds
     secrets: inherit
     with:
       project-path: demo
       targets: macos-appkit, linux-gtk, linux-qt, windows-xaml, ios-uikit, android-mdc, web-dom, harmony-arkui
-      # The CLI that builds, and the framework revision: with no lock committed the shared
-      # workflow resolves one fresh, and this moves every leg to the same tip-of-main revision.
-      day-version: main
       update-day-deps: true
       scripts: dayscript/walkthrough.yaml
       preflight-checks: fmt, clippy, test
