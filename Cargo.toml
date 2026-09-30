@@ -36,6 +36,8 @@ arkui = ["dep:day-arkui"]        # + [package.metadata.day.ohos]
 # exists so apps can enable `day-piece-media/mock` uniformly; the media kind then falls back to
 # day's placeholder leaf.
 xaml = ["dep:day-xaml", "dep:day-xaml-sys"]
+# WinUI 3 (windows-winui, docs/winui.md): the xaml half, built against Microsoft.UI.Xaml.
+winui = ["xaml", "day-xaml-sys/winui"]
 # Web: a plain <video>. Registered at runtime rather than link-time, because wasm has no `linkme`
 # distributed slice (see lib-dom.rs), so the piece registers itself from its constructor.
 dom = ["dep:day-dom"]
@@ -48,7 +50,7 @@ mock = []
 compat = "0.4"
 
 [package.metadata.day.piece]
-backends = ["appkit", "gtk", "qt", "uikit", "mdc", "xaml", "arkui", "dom", "mock"]
+backends = ["appkit", "gtk", "qt", "uikit", "mdc", "xaml", "winui", "arkui", "dom", "mock"]
 
 [dependencies]
 day-bridge = { git = "https://github.com/daybrite/day.git" }

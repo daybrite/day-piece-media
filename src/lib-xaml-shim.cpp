@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 // The media piece's C++/WinRT shim, parallel to src/lib-qt-shim.cpp. day-xaml hosts the UWP
-// system XAML (winrt::Windows::UI::Xaml, from the base Windows SDK, not WinAppSDK), so the matching
+// system XAML (DAY_XAML_NS, from the base Windows SDK, not WinAppSDK), so the matching
 // player is Windows.UI.Xaml.Controls.MediaPlayerElement backed by a Windows.Media.Playback
 // MediaPlayer. The element is boxed into a day handle via the `day_xaml_box`/`day_xaml_unbox`
 // functions day-xaml-sys exports (no edits to day's toolkit crates), exactly like the
@@ -21,8 +21,23 @@
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Media.Core.h>     // MediaSource
 #include <winrt/Windows.Media.Playback.h> // MediaPlayer
+// One shim, two XAML stacks (docs/winui.md): windows-xaml builds it against system XAML,
+// windows-winui (DAY_WINUI) against WinUI 3. The namespaces differ; the controls do not.
+#ifdef DAY_WINUI
+#define DAY_XAML_NS winrt::Microsoft::UI::Xaml
+#else
+#define DAY_XAML_NS winrt::Windows::UI::Xaml
+#endif
+#ifdef DAY_WINUI
+#include <winrt/Microsoft.UI.Xaml.h>
+#else
 #include <winrt/Windows.UI.Xaml.h>
+#endif
+#ifdef DAY_WINUI
+#include <winrt/Microsoft.UI.Xaml.Controls.h>
+#else
 #include <winrt/Windows.UI.Xaml.Controls.h>
+#endif
 
 #include <windows.h>
 
@@ -34,8 +49,8 @@
 
 using namespace winrt;
 namespace WF = winrt::Windows::Foundation;
-namespace WUX = winrt::Windows::UI::Xaml;
-namespace WUXC = winrt::Windows::UI::Xaml::Controls;
+namespace WUX = DAY_XAML_NS;
+namespace WUXC = DAY_XAML_NS::Controls;
 namespace WMC = winrt::Windows::Media::Core;
 namespace WMP = winrt::Windows::Media::Playback;
 
@@ -171,6 +186,9 @@ void *day_media_xaml_new(uint64_t id, const char *url, int autoplay, int looping
         if (auto src = source_from(url))
             player.Source(src);
         WUXC::MediaPlayerElement mpe;
+        // Transport chrome overlays video on a dark scrim, independent of the app theme.
+        // Inheriting Light makes its time readouts dark-on-dark in XAML Islands.
+        mpe.RequestedTheme(WUX::ElementTheme::Dark);
         mpe.AreTransportControlsEnabled(controls != 0 && audio_only == 0);
         if (audio_only != 0)
             mpe.Visibility(WUX::Visibility::Collapsed);
