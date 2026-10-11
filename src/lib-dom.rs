@@ -8,7 +8,9 @@
 // transport chrome, buffering, scrubbing, fullscreen, captions and picture-in-picture, and every
 // MediaProps field maps onto an attribute of the same meaning. Playback state comes back through
 // this crate's browser bridge, which turns the element's `playing`/`pause`/
-// `waiting`/`ended`/`error` events into the piece's report codes on the Custom channel.
+// `waiting`/`ended`/`error` events into the piece's report codes on the Custom channel; the
+// bridge also owns the two things an attribute cannot express, muting (a property) and stopping
+// (removing `src`), see browser.rs.
 //
 // Two web-only truths, both documented in docs/media.md:
 //
@@ -33,24 +35,29 @@ day_core::tls_group! {
     static AUDIO_ONLY: RefCell<HashSet<u32>> = RefCell::new(HashSet::new());
 }
 
-/// Boolean DOM attributes use day-dom's marker convention: `"-"` sets, `""` removes.
-fn flag(on: bool) -> &'static str {
-    if on { "-" } else { "" }
-}
-
 fn make(backend: &mut Dom, p: &MediaProps, _id: NodeId) -> DomHandle {
     let h = backend.element(if p.audio_only { "audio" } else { "video" });
     if !p.url.is_empty() {
         backend.set_attr(&h, "src", &p.url);
     }
-    backend.set_attr(&h, "controls", flag(p.controls && !p.audio_only));
-    backend.set_attr(&h, "autoplay", flag(p.autoplay));
-    backend.set_attr(&h, "loop", flag(p.looping));
-    backend.set_attr(&h, "muted", flag(p.muted));
-    // `playsinline` keeps iOS Safari from hijacking the whole screen for playback; without it a
-    // small inline player becomes a fullscreen takeover on iPhone.
-    backend.set_attr(&h, "playsinline", "-");
-    super::browser::attach(h.0 as i32, p.volume);
+    // A boolean attribute is set only when it is on. day-dom's `""`-removes convention covers
+    // `disabled` and `readonly` alone; for any other name `""` is a PRESENT attribute, and
+    // `autoplay=""` means autoplay. Nothing here changes after creation (MediaPatch carries no
+    // flag), so there is never anything to remove. `muted` is not an attribute at all: one set by
+    // a script never mutes, the property does (browser.rs).
+    for (name, on) in [
+        ("controls", p.controls && !p.audio_only),
+        ("autoplay", p.autoplay),
+        ("loop", p.looping),
+        // `playsinline` keeps iOS Safari from hijacking the whole screen for playback; without
+        // it a small inline player becomes a fullscreen takeover on iPhone.
+        ("playsinline", true),
+    ] {
+        if on {
+            backend.set_attr(&h, name, "-");
+        }
+    }
+    super::browser::attach(h.0 as i32, p.volume, p.muted);
     if p.audio_only {
         backend.set_attr(&h, "style", "display:none");
         AUDIO_ONLY.with(|s| s.borrow_mut().insert(h.0));
@@ -73,12 +80,10 @@ fn update(backend: &mut Dom, h: &DomHandle, patch: &MediaPatch) {
         MediaPatch::Play => backend.call(h, "play"),
         MediaPatch::Pause => backend.call(h, "pause"),
         // Removing the source and re-loading is what makes the element let its connection go
-        // (a paused live stream keeps buffering); the `emptied` event reports the Idle.
-        MediaPatch::Stop => {
-            backend.call(h, "pause");
-            backend.set_attr(h, "src", "");
-            backend.call(h, "load");
-        }
+        // (a paused live stream keeps buffering); the `emptied` event reports the Idle. It goes
+        // through the bridge because `src` must be REMOVED: day-dom's `set_attr` cannot remove
+        // it, and an empty `src` is a format error, not an absence (browser.rs).
+        MediaPatch::Stop => super::browser::stop(h.0 as i32),
         MediaPatch::Volume(v) => super::browser::volume(h.0 as i32, *v),
     }
 }

@@ -5,8 +5,9 @@
 day_bridge::bridge! {
     #[day_bridge::declare]
     extern "day" {
-        fn attach_media(id: i32, volume: f64);
+        fn attach_media(id: i32, volume: f64, muted: bool);
         fn set_volume(id: i32, volume: f64);
+        fn stop_media(id: i32);
     }
     #[day_bridge::impl(js, platforms = [web])]
     js!(r#"
@@ -14,8 +15,23 @@ day_bridge::bridge! {
             const el = dayHost.dom.element(id);
             if (el && Number.isFinite(volume)) el.volume = Math.max(0, Math.min(1, volume));
         }
-        function attach_media(id, volume) {
+        // Drop the source and let the connection go. The attribute is REMOVED, never set to "":
+        // an empty `src` fails resource selection with MEDIA_ERR_SRC_NOT_SUPPORTED, and that
+        // `error` event lands after the `emptied` one, so a stop would read as a format failure.
+        // With no `src` at all, `load()` empties the element and selects nothing.
+        function unload(el) {
+            el.pause();
+            el.removeAttribute('src');
+            el.load();
+        }
+        function stop_media(id) {
             const el = dayHost.dom.element(id);
+            if (el) unload(el);
+        }
+        function attach_media(id, volume, muted) {
+            const el = dayHost.dom.element(id);
+            // A `muted` attribute only counts when the parser sets it; a script sets the property.
+            el.muted = !!muted;
             set_volume(id, volume);
             const handlers = [];
             const on = (name, handler) => { el.addEventListener(name, handler); handlers.push([name, handler]); };
@@ -36,20 +52,23 @@ day_bridge::bridge! {
             });
             dayHost.dom.onRelease(id, () => {
                 for (const [name, handler] of handlers) el.removeEventListener(name, handler);
-                el.pause();
-                el.removeAttribute('src');
-                el.load();
+                unload(el);
             });
         }
     "#);
     #[day_bridge::impl(rust, platforms = [other])]
-    fn attach_media(id: i32, volume: f64) { let _ = (id, volume); }
+    fn attach_media(id: i32, volume: f64, muted: bool) { let _ = (id, volume, muted); }
     #[day_bridge::impl(rust, platforms = [other])]
     fn set_volume(id: i32, volume: f64) { let _ = (id, volume); }
+    #[day_bridge::impl(rust, platforms = [other])]
+    fn stop_media(id: i32) { let _ = id; }
 }
-pub(crate) fn attach(id: i32, volume: f64) {
-    attach_media(id, volume);
+pub(crate) fn attach(id: i32, volume: f64, muted: bool) {
+    attach_media(id, volume, muted);
 }
 pub(crate) fn volume(id: i32, value: f64) {
     set_volume(id, value);
+}
+pub(crate) fn stop(id: i32) {
+    stop_media(id);
 }

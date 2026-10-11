@@ -13,16 +13,30 @@ function setup() {
     element.pause = () => { element.paused = true; element.dispatchEvent(new Event('pause')); };
     element.load = () => { element.loaded = true; element.dispatchEvent(new Event('emptied')); };
     element.removeAttribute = name => { element.removed = name; };
-    const bridge = runInNewContext(`${arm}\n({attach_media, set_volume})`, {
+    const bridge = runInNewContext(`${arm}\n({attach_media, set_volume, stop_media})`, {
         dayHost: { dom: {
             element: () => element,
             emit: (...args) => reports.push(args),
             onRelease: (_id, cleanup) => { release = cleanup; },
         } },
     });
-    bridge.attach_media(3, 0.5);
+    bridge.attach_media(3, 0.5, false);
     return { element, reports, bridge, release: () => release() };
 }
+test('muting is the property, which a script-set attribute never reaches', () => {
+    const { element, bridge } = setup();
+    assert.equal(element.muted, false);
+    bridge.attach_media(3, 0.5, true);
+    assert.equal(element.muted, true);
+});
+test('stop removes the source instead of emptying it, and ends on Idle', () => {
+    const { element, reports, bridge } = setup();
+    bridge.stop_media(3);
+    assert.equal(element.paused, true);
+    assert.equal(element.removed, 'src');
+    assert.equal(element.loaded, true);
+    assert.deepEqual(reports.map(([, code]) => code), [3, 0]);
+});
 test('playback events carry the native state protocol', () => {
     const { element, reports } = setup();
     for (const [event, code] of [['loadstart',1],['waiting',1],['playing',2],['pause',3],['ended',4],['emptied',0]]) {

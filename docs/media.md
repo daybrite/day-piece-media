@@ -105,11 +105,13 @@ handling. Each `src/lib-<toolkit>.rs` implements a renderer. Native renderers re
 | Qt | [lib-qt-shim.cpp](../src/lib-qt-shim.cpp): QMediaPlayer, QAudioOutput, QVideoWidget. | `build.rs` compiles the shim and probes `Qt6MultimediaWidgets` with pkg-config. |
 | Windows XAML | [lib-xaml-shim.cpp](../src/lib-xaml-shim.cpp): MediaPlayerElement and MediaPlayer. | `build.rs` compiles C++/WinRT against the Windows SDK. |
 | HarmonyOS | [Index.ets](../platform/harmony/ets/Index.ets): ArkUI Video and AVPlayer. | `.ohos` metadata stages ArkTS into the app project. |
-| Browser | [lib-dom.rs](../src/lib-dom.rs) creates audio/video elements; [browser.rs](../src/browser.rs) owns events, volume, and teardown. | `day-build` generates the crate's JavaScript bridge; Day stages it with the app. |
+| Browser | [lib-dom.rs](../src/lib-dom.rs) creates audio/video elements; [browser.rs](../src/browser.rs) owns events, volume, muting, stop, and teardown. | `day-build` generates the crate's JavaScript bridge; Day stages it with the app. |
 
-The browser uses `dayHost.dom.element`, `emit`, and `onRelease`. Release removes listeners before
-unloading the source. Core Day supplies generic element and event operations; it contains no
-media-specific browser listener or volume handling.
+The browser uses `dayHost.dom.element`, `emit`, and `onRelease`. Stop and release remove the
+`src` attribute and reload the element, which empties it without an error; an empty `src` would
+report a format error instead. Muting sets the element property, since a `muted` attribute set
+from a script has no effect. Release also removes listeners first. Core Day supplies generic
+element and event operations; it contains no media-specific browser listener or volume handling.
 
 Android preparation is asynchronous. Volume changes apply to the current MediaPlayer and are
 reapplied after a source change. VideoView reports preparation before completing a queued start,
