@@ -32,3 +32,14 @@ Use `day devices boot -p harmony-arkui --headless` to start an emulator and sele
 The local OpenHarmony QEMU image lacks `libmedia_plugin_FileFdSource.z.so`. On that image,
 the app builds and launches but reports a playback error; three playback assertions fail.
 Use a device or image with the media plugins installed to run the full walkthrough.
+
+
+## Generated native projects
+
+Use a Day CLI with automatic native project generation; Apple builds require **Xcode 27
+or newer**. Xcode project documents, Android Gradle files, and HarmonyOS hvigor files are
+created under `build/` by `day prepare`, `day build`, and `day launch`. Open the selected
+project with `day open -t <target>`; edits to generated files are disposable. Apple Swift
+sources, plists and `.xcconfig` files, and any Android resource overlays, remain app-owned
+under `platform/`. For additional native configuration, use
+`day project add-target <target> --persist-native-project` to create a persistent override.
