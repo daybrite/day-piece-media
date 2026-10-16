@@ -35,6 +35,10 @@ unsafe extern "C" {
     fn day_media_xaml_play(w: *mut c_void);
     fn day_media_xaml_pause(w: *mut c_void);
     fn day_media_xaml_stop(w: *mut c_void);
+    fn day_media_xaml_seek(w: *mut c_void, seconds: f64);
+    fn day_media_xaml_rate(w: *mut c_void, rate: f64);
+    fn day_media_xaml_release(w: *mut c_void);
+    fn day_media_xaml_poll(w: *mut c_void);
     fn day_media_xaml_set_volume(w: *mut c_void, volume: f64);
     fn day_media_xaml_is_audio_only(w: *mut c_void) -> c_int;
 }
@@ -91,6 +95,10 @@ fn update(_backend: &mut Xaml, h: &WinHandle, patch: &MediaPatch) {
     unsafe {
         match patch {
             MediaPatch::Load(url) => day_media_xaml_load(h.0, cstr(url).as_ptr()),
+            MediaPatch::Seek(value) => day_media_xaml_seek(h.0, *value),
+            MediaPatch::Rate(value) => day_media_xaml_rate(h.0, *value),
+            MediaPatch::Background(_) => {}
+            MediaPatch::Poll => day_media_xaml_poll(h.0),
             MediaPatch::Play => day_media_xaml_play(h.0),
             MediaPatch::Pause => day_media_xaml_pause(h.0),
             MediaPatch::Stop => day_media_xaml_stop(h.0),
@@ -109,4 +117,8 @@ fn measure(backend: &mut Xaml, h: &WinHandle, proposal: Proposal) -> Size {
 
 day_pieces::renderer!(day_xaml::RENDERERS, Xaml,
     kind: KIND, props: MediaProps, patch: MediaPatch,
-    make: make, update: update, measure: measure);
+    make: make, update: update, measure: measure, release: release);
+
+fn release(_: &mut Xaml, h: &WinHandle) {
+    unsafe { day_media_xaml_release(h.0) };
+}

@@ -25,27 +25,27 @@ use std::ptr::null_mut;
 
 use day_spec::{NodeId, Proposal, Size};
 use day_uikit::Uikit;
+use objc2::AnyThread;
 use objc2::rc::Retained;
+use objc2::runtime::ProtocolObject;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol};
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, class, define_class, extern_class, msg_send,
     sel,
 };
-use objc2::AnyThread;
-use objc2::runtime::ProtocolObject;
+use objc2_av_foundation::NSValueAVFoundationExtensions;
 use objc2_av_foundation::{
     AVMetadataCommonIdentifierAlbumName, AVMetadataCommonIdentifierArtist,
-    AVMetadataCommonIdentifierTitle, AVMetadataIdentifierIcyMetadataStreamTitle,
-    AVPlayerItemMetadataOutput, AVPlayerItemMetadataOutputPushDelegate,
-    AVPlayerItemOutputPushDelegate, AVPlayerItemTrack, AVTimedMetadataGroup,
-    AVPlayer, AVPlayerItem, AVPlayerItemDidPlayToEndTimeNotification,
-    AVPlayerItemFailedToPlayToEndTimeNotification, AVPlayerItemStatus, AVPlayerTimeControlStatus,
+    AVMetadataCommonIdentifierTitle, AVMetadataIdentifierIcyMetadataStreamTitle, AVPlayer,
+    AVPlayerItem, AVPlayerItemDidPlayToEndTimeNotification,
+    AVPlayerItemFailedToPlayToEndTimeNotification, AVPlayerItemMetadataOutput,
+    AVPlayerItemMetadataOutputPushDelegate, AVPlayerItemOutputPushDelegate, AVPlayerItemStatus,
+    AVPlayerItemTrack, AVPlayerTimeControlStatus, AVTimedMetadataGroup,
 };
-use objc2_core_media::kCMTimeZero;
+use objc2_core_media::{CMTime, kCMTimeZero};
 use objc2_foundation::{
-    NSArray,
-    NSKeyValueObservingOptions, NSNotificationCenter, NSObjectNSKeyValueObserverRegistration,
-    NSString, NSURL,
+    NSArray, NSKeyValueObservingOptions, NSNotificationCenter,
+    NSObjectNSKeyValueObserverRegistration, NSString, NSURL,
 };
 use objc2_ui_kit::{UIResponder, UIView, UIViewController};
 
@@ -78,6 +78,7 @@ struct ObserverIvars {
     player: Retained<AVPlayer>,
     node: NodeId,
     looping: bool,
+    resume_after_interruption: std::cell::Cell<bool>,
 }
 
 define_class!(
@@ -90,6 +91,27 @@ define_class!(
     unsafe impl NSObjectProtocol for MediaObserver {}
 
     impl MediaObserver {
+        #[unsafe(method(audioInterrupted:))]
+        fn audio_interrupted(&self, note: *mut AnyObject) {
+            let player = &self.ivars().player;
+            let kind = notification_integer(note, "AVAudioSessionInterruptionTypeKey");
+            if kind == 1 {
+                self.ivars().resume_after_interruption.set(unsafe { player.rate() } != 0.0);
+                unsafe { player.pause(); }
+            } else if self.ivars().resume_after_interruption.replace(false)
+                && notification_integer(note, "AVAudioSessionInterruptionOptionKey") & 1 != 0 {
+                activate_audio_session();
+                unsafe { player.play(); }
+            }
+        }
+        #[unsafe(method(audioRouteChanged:))]
+        fn audio_route_changed(&self, note: *mut AnyObject) {
+            // Old output disappeared (e.g. headphones unplugged): do not play through speakers.
+            if notification_integer(note, "AVAudioSessionRouteChangeReasonKey") == 2 {
+                self.ivars().resume_after_interruption.set(false);
+                unsafe { self.ivars().player.pause(); }
+            }
+        }
         // Fired when any player item plays to its end (registered with object: nil so `.load()`
         // swaps stay covered); act only when it is the observed player's current item.
         #[unsafe(method(itemDidPlayToEnd:))]
@@ -157,10 +179,25 @@ impl MediaObserver {
             player,
             node,
             looping,
+            resume_after_interruption: std::cell::Cell::new(false),
         });
         let this: Retained<Self> = unsafe { msg_send![super(this), init] };
         let center = NSNotificationCenter::defaultCenter();
         unsafe {
+            center.addObserver_selector_name_object(
+                &this,
+                sel!(audioInterrupted:),
+                Some(&NSString::from_str(
+                    "AVAudioSessionInterruptionNotification",
+                )),
+                None,
+            );
+            center.addObserver_selector_name_object(
+                &this,
+                sel!(audioRouteChanged:),
+                Some(&NSString::from_str("AVAudioSessionRouteChangeNotification")),
+                None,
+            );
             center.addObserver_selector_name_object(
                 &this,
                 sel!(itemDidPlayToEnd:),
@@ -246,10 +283,7 @@ define_class!(
             groups: &NSArray<AVTimedMetadataGroup>,
             _track: Option<&AVPlayerItemTrack>,
         ) {
-            log::debug!(
-                "day-piece-media: {} timed metadata group(s)",
-                groups.len()
-            );
+            log::debug!("day-piece-media: {} timed metadata group(s)", groups.len());
             if let Some(text) = metadata_text(groups) {
                 day_uikit::emit(
                     self.ivars().node,
@@ -279,12 +313,10 @@ impl MetadataDelegate {
 /// The `report::METADATA` payload for a batch of timed groups: an ICY `StreamTitle` as it
 /// came, else the ID3/common title, artist, and album packed for [`StreamMetadata::from_report`].
 fn metadata_text(groups: &NSArray<AVTimedMetadataGroup>) -> Option<String> {
-    groups
-        .iter()
-        .find_map(|group| {
-            let items = unsafe { group.items() };
-            items_text(&items)
-        })
+    groups.iter().find_map(|group| {
+        let items = unsafe { group.items() };
+        items_text(&items)
+    })
 }
 
 /// The same, for one batch of items (a group's, or the item's `timedMetadata`).
@@ -360,11 +392,16 @@ fn state_of(player: &AVPlayer) -> (i32, String) {
             .unwrap_or_else(|| "playback failed".into());
         return (report::ERROR, text);
     }
+    // AVPlayer sends a final paused KVO notification as well as the end notification.
+    // Preserve Ended once the finite item has reached its end.
+    let position = unsafe { player.currentTime().seconds() };
+    let duration = unsafe { item.duration().seconds() };
+    if duration.is_finite() && duration > 0.0 && position >= duration - 0.01 {
+        return (report::ENDED, String::new());
+    }
     match unsafe { player.timeControlStatus() } {
         AVPlayerTimeControlStatus::Playing => (report::PLAYING, String::new()),
-        AVPlayerTimeControlStatus::WaitingToPlayAtSpecifiedRate => {
-            (report::LOADING, String::new())
-        }
+        AVPlayerTimeControlStatus::WaitingToPlayAtSpecifiedRate => (report::LOADING, String::new()),
         _ => (report::PAUSED, String::new()),
     }
 }
@@ -372,15 +409,15 @@ fn state_of(player: &AVPlayer) -> (i32, String) {
 /// Put the process's audio session in the `playback` category, once. Failures are logged and
 /// otherwise ignored: the player still plays in the foreground without it.
 fn activate_audio_session() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| unsafe {
+    unsafe {
         let session: *mut AnyObject = msg_send![class!(AVAudioSession), sharedInstance];
         if session.is_null() {
             return;
         }
         // The constant's value is its own name, which is what lets this avoid a binding.
         let category = NSString::from_str("AVAudioSessionCategoryPlayback");
-        let ok: bool = msg_send![&*session, setCategory: &*category, error: null_mut::<*mut AnyObject>()];
+        let ok: bool =
+            msg_send![&*session, setCategory: &*category, error: null_mut::<*mut AnyObject>()];
         if !ok {
             log::warn!("day-piece-media: AVAudioSession refused the playback category");
         }
@@ -388,7 +425,7 @@ fn activate_audio_session() {
         if !ok {
             log::warn!("day-piece-media: AVAudioSession could not be activated");
         }
-    });
+    }
 }
 
 /// What we retain per media view: the player, its controller when it has one (a sound-only
@@ -423,12 +460,7 @@ fn media_url(source: &str) -> Option<Retained<NSURL>> {
     }
 }
 
-fn load_url(
-    player: &AVPlayer,
-    source: &str,
-    metadata: &MetadataDelegate,
-    mtm: MainThreadMarker,
-) {
+fn load_url(player: &AVPlayer, source: &str, metadata: &MetadataDelegate, mtm: MainThreadMarker) {
     let Some(url) = media_url(source) else {
         return;
     };
@@ -492,13 +524,62 @@ fn update(_backend: &mut Uikit, h: &Retained<UIView>, patch: &MediaPatch) {
     }) else {
         return;
     };
+    if matches!(
+        patch,
+        MediaPatch::Pause | MediaPatch::Stop | MediaPatch::Load(_)
+    ) {
+        LIVE.with(|m| {
+            if let Some(live) = m.borrow().get(&key_of(h)) {
+                live.observer.ivars().resume_after_interruption.set(false);
+            }
+        });
+    }
     match patch {
+        MediaPatch::Background(_) => {}
+        MediaPatch::Poll => {
+            let timeline = timeline_of(&player);
+            LIVE.with(|m| {
+                if let Some(live) = m.borrow().get(&key_of(h)) {
+                    live.observer.report(report::TIMELINE, timeline.encode());
+                }
+            });
+        }
+        MediaPatch::Seek(seconds) => {
+            let timeline = timeline_of(&player);
+            if let Some(target) = timeline.seek_target(*seconds) {
+                unsafe {
+                    player.seekToTime_toleranceBefore_toleranceAfter(
+                        CMTime::with_seconds(target, 1_000_000),
+                        kCMTimeZero,
+                        kCMTimeZero,
+                    );
+                }
+            } else {
+                LIVE.with(|m| {
+                    if let Some(live) = m.borrow().get(&key_of(h)) {
+                        live.observer
+                            .report(report::COMMAND_ERROR, "seek:unsupported".into());
+                    }
+                });
+            }
+        }
+        MediaPatch::Rate(rate) => unsafe {
+            if valid_rate(*rate) {
+                player.setDefaultRate(*rate as f32);
+                if player.rate() != 0.0 {
+                    player.setRate(*rate as f32);
+                }
+            }
+        },
         MediaPatch::Load(url) => {
             let mtm = MainThreadMarker::new().unwrap();
             load_url(&player, url, &metadata, mtm);
             unsafe { player.play() };
         }
-        MediaPatch::Play => unsafe { player.play() },
+        MediaPatch::Play => {
+            activate_audio_session();
+            unsafe { player.play() };
+        }
         MediaPatch::Pause => unsafe { player.pause() },
         // Dropping the item is what lets a live stream's connection go; the KVO on
         // `currentItem.status` reports the resulting Idle.
@@ -538,3 +619,54 @@ fn release(_backend: &mut Uikit, h: &Retained<UIView>) {
 day_pieces::renderer!(day_uikit::RENDERERS, Uikit,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);
+
+fn timeline_of(player: &AVPlayer) -> MediaTimeline {
+    let mut value = MediaTimeline::default();
+    unsafe {
+        value.rate = player.defaultRate() as f64;
+        value.capabilities.volume = true;
+        let Some(item) = player.currentItem() else {
+            return value;
+        };
+        let position = player.currentTime().seconds();
+        value.position = if position.is_finite() {
+            position.max(0.0)
+        } else {
+            0.0
+        };
+        let duration = item.duration().seconds();
+        value.duration = (duration.is_finite() && duration >= 0.0).then_some(duration);
+        let ranges = |values: Retained<NSArray<objc2_foundation::NSValue>>| -> Vec<TimeRange> {
+            values
+                .iter()
+                .filter_map(|v| {
+                    let r = v.CMTimeRangeValue();
+                    let start = r.start.seconds();
+                    let end = start + r.duration.seconds();
+                    (start.is_finite() && end.is_finite() && start >= 0.0 && end >= start)
+                        .then_some(TimeRange { start, end })
+                })
+                .collect()
+        };
+        value.seekable = ranges(item.seekableTimeRanges());
+        value.buffered = ranges(item.loadedTimeRanges());
+        value.capabilities.seek = !value.seekable.is_empty();
+        value.capabilities.rate = item.status() == AVPlayerItemStatus::ReadyToPlay;
+    }
+    value
+}
+
+fn notification_integer(note: *mut AnyObject, key: &str) -> usize {
+    unsafe {
+        let info: *mut AnyObject = msg_send![&*note, userInfo];
+        if info.is_null() {
+            return 0;
+        }
+        let number: *mut AnyObject = msg_send![&*info, objectForKey: &*NSString::from_str(key)];
+        if number.is_null() {
+            0
+        } else {
+            msg_send![&*number, unsignedIntegerValue]
+        }
+    }
+}

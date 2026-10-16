@@ -32,6 +32,9 @@ unsafe extern "C" {
     fn day_media_play(w: *mut c_void);
     fn day_media_pause(w: *mut c_void);
     fn day_media_stop(w: *mut c_void);
+    fn day_media_seek(w: *mut c_void, seconds: f64);
+    fn day_media_rate(w: *mut c_void, rate: f64);
+    fn day_media_poll(w: *mut c_void);
     fn day_media_set_volume(w: *mut c_void, volume: f64);
     fn day_media_is_audio_only(w: *mut c_void) -> c_int;
 }
@@ -81,6 +84,10 @@ fn update(_backend: &mut Qt, h: &QtHandle, patch: &MediaPatch) {
     unsafe {
         match patch {
             MediaPatch::Load(url) => day_media_load(h.0, cstr(url).as_ptr()),
+            MediaPatch::Seek(value) => day_media_seek(h.0, *value),
+            MediaPatch::Rate(value) => day_media_rate(h.0, *value),
+            MediaPatch::Background(_) => {}
+            MediaPatch::Poll => day_media_poll(h.0),
             MediaPatch::Play => day_media_play(h.0),
             MediaPatch::Pause => day_media_pause(h.0),
             MediaPatch::Stop => day_media_stop(h.0),

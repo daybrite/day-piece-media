@@ -19,6 +19,10 @@
 #include <QWidget>
 
 #include <cstdint>
+#include <cmath>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
 
 typedef void (*DayMediaStateCb)(uint64_t, int, const char *);
 static DayMediaStateCb g_state_cb = nullptr;
@@ -157,6 +161,29 @@ void day_media_set_volume(void *w, double volume) {
     if (QAudioOutput *a = static_cast<DayMedia *>(w)->audio)
         a->setVolume(static_cast<float>(volume));
 }
+void day_media_seek(void *w, double seconds) {
+    auto m = static_cast<DayMedia *>(w);
+    if (!m->player || !m->player->isSeekable()) { m->report(8, "seek:unsupported"); return; }
+    if (std::isfinite(seconds) && seconds >= 0)
+        m->player->setPosition(static_cast<qint64>(std::min(seconds * 1000, static_cast<double>(m->player->duration()))));
+}
+void day_media_rate(void *w, double rate) {
+    if (auto p = static_cast<DayMedia *>(w)->player)
+        if (std::isfinite(rate) && rate >= .25 && rate <= 4) p->setPlaybackRate(rate);
+}
+void day_media_poll(void *w) {
+    auto m = static_cast<DayMedia *>(w);
+    if (!m->player) return;
+    auto p = m->player;
+    const double duration = p->duration() / 1000.0;
+    QJsonArray seekable;
+    if (p->isSeekable() && duration > 0) seekable.append(QJsonObject{{"start", 0}, {"end", duration}});
+    QJsonObject data{{"position", p->position() / 1000.0},
+        {"duration", duration > 0 ? QJsonValue(duration) : QJsonValue(QJsonValue::Null)},
+        {"rate", p->playbackRate()}, {"seekable", seekable},
+        {"capabilities", QJsonObject{{"seek", !seekable.isEmpty()}, {"rate", true}, {"volume", true}}}};
+    m->report(7, QString::fromUtf8(QJsonDocument(data).toJson(QJsonDocument::Compact)));
+}
 int day_media_is_audio_only(void *w) { return static_cast<DayMedia *>(w)->audioOnly ? 1 : 0; }
 
 } // extern "C"
@@ -214,6 +241,18 @@ void day_media_play(void *) {}
 void day_media_pause(void *) {}
 void day_media_stop(void *) {}
 void day_media_set_volume(void *, double) {}
+void day_media_seek(void *w, double) {
+    if (g_state_cb) g_state_cb(static_cast<DayMedia *>(w)->id, 8, "seek:unsupported");
+}
+void day_media_rate(void *w, double rate) {
+    if (rate != 1 && g_state_cb) g_state_cb(static_cast<DayMedia *>(w)->id, 8, "rate:unsupported");
+}
+void day_media_poll(void *w) {
+    if (g_state_cb) {
+        g_state_cb(static_cast<DayMedia *>(w)->id, 7, "{}");
+        g_state_cb(static_cast<DayMedia *>(w)->id, 5, "no media engine (Qt6MultimediaWidgets is not installed)");
+    }
+}
 int day_media_is_audio_only(void *w) { return static_cast<DayMedia *>(w)->audioOnly ? 1 : 0; }
 
 } // extern "C"

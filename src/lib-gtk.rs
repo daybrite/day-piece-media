@@ -21,6 +21,7 @@ use gtk4::glib;
 use gtk4::prelude::*;
 
 /// The stream a sound-only leaf carries, keyed as widget data (a `Video` owns its stream itself).
+const PROPS_KEY: &str = "day-media-props";
 const STREAM_KEY: &str = "day-media-stream";
 /// Marks a sound-only leaf, which measures zero.
 const AUDIO_ONLY_KEY: &str = "day-media-audio-only";
@@ -105,10 +106,16 @@ fn stream_of(h: &gtk4::Widget) -> Option<gtk4::MediaStream> {
         return video.media_stream();
     }
     // SAFETY: the only value ever stored under this key is a `MediaStream` (see `set_stream`).
-    unsafe { h.data::<gtk4::MediaStream>(STREAM_KEY).map(|p| p.as_ref().clone()) }
+    unsafe {
+        h.data::<gtk4::MediaStream>(STREAM_KEY)
+            .map(|p| p.as_ref().clone())
+    }
 }
 
 fn set_stream(h: &gtk4::Widget, stream: Option<gtk4::MediaStream>) {
+    if let Some(old) = stream_of(h) {
+        old.pause();
+    }
     if let Some(video) = h.downcast_ref::<gtk4::Video>() {
         video.set_media_stream(stream.as_ref());
         return;
@@ -133,6 +140,9 @@ fn make(_backend: &mut Gtk, p: &MediaProps, id: NodeId) -> gtk4::Widget {
         unsafe { host.set_data(AUDIO_ONLY_KEY, true) };
         let widget: gtk4::Widget = host.upcast();
         remember_node(&widget, id);
+        unsafe {
+            widget.set_data(PROPS_KEY, p.clone());
+        }
         if !p.url.is_empty() {
             let media = new_stream(&p.url, p, id);
             if p.autoplay {
@@ -151,22 +161,72 @@ fn make(_backend: &mut Gtk, p: &MediaProps, id: NodeId) -> gtk4::Widget {
     }
     let widget: gtk4::Widget = video.upcast();
     remember_node(&widget, id);
+    unsafe {
+        widget.set_data(PROPS_KEY, p.clone());
+    }
     widget
 }
 
 fn update(_backend: &mut Gtk, h: &gtk4::Widget, patch: &MediaPatch) {
     match patch {
+        MediaPatch::Background(_) => {}
+        MediaPatch::Poll => {
+            if let Some(id) = node_of(h) {
+                let mut value = MediaTimeline::default();
+                value.capabilities.volume = true;
+                if let Some(stream) = stream_of(h) {
+                    // A MediaFile can fail synchronously, before notify handlers are attached.
+                    if let Some(error) = stream.error() {
+                        report(id, report::ERROR, error.message().to_string());
+                    }
+                    value.position = (stream.timestamp() as f64 / 1_000_000.0).max(0.0);
+                    let duration = stream.duration() as f64 / 1_000_000.0;
+                    value.duration = (duration > 0.0).then_some(duration);
+                    value.seeking = stream.is_seeking();
+                    value.capabilities.seek =
+                        stream.is_prepared() && stream.is_seekable() && duration > 0.0;
+                    if value.capabilities.seek {
+                        value.seekable.push(TimeRange {
+                            start: 0.0,
+                            end: duration,
+                        });
+                    }
+                }
+                report(id, report::TIMELINE, value.encode());
+            }
+        }
+        MediaPatch::Seek(seconds) => {
+            if let Some(stream) = stream_of(h) {
+                if stream.is_prepared()
+                    && stream.is_seekable()
+                    && seconds.is_finite()
+                    && *seconds >= 0.0
+                {
+                    stream.seek(
+                        (*seconds * 1_000_000.0)
+                            .min(stream.duration() as f64)
+                            .max(0.0) as i64,
+                    );
+                } else if let Some(id) = node_of(h) {
+                    report(id, report::COMMAND_ERROR, "seek:unsupported".into());
+                }
+            }
+        }
+        MediaPatch::Rate(rate) => {
+            if *rate != 1.0
+                && let Some(id) = node_of(h)
+            {
+                report(id, report::COMMAND_ERROR, "rate:unsupported".into());
+            }
+        }
         MediaPatch::Load(url) => {
-            // Preserve the current mute state and volume across the swap (both live on the
-            // stream).
-            let (muted, volume) = match stream_of(h) {
-                Some(s) => (s.is_muted(), s.volume()),
-                None => (false, 1.0),
-            };
+            // Keep properties even after Stop has released the stream.
+            let props = unsafe { h.data::<MediaProps>(PROPS_KEY).map(|p| p.as_ref().clone()) }
+                .unwrap_or_default();
             let media = media_file(url);
-            media.set_muted(muted);
-            media.set_volume(volume);
-            media.set_loop(h.downcast_ref::<gtk4::Video>().is_some_and(|v| v.is_loop()));
+            media.set_muted(props.muted);
+            media.set_volume(props.volume);
+            media.set_loop(props.looping);
             if let Some(id) = node_of(h) {
                 observe(media.upcast_ref(), id);
             }
@@ -193,6 +253,11 @@ fn update(_backend: &mut Gtk, h: &gtk4::Widget, patch: &MediaPatch) {
             }
         }
         MediaPatch::Volume(v) => {
+            unsafe {
+                if let Some(mut props) = h.data::<MediaProps>(PROPS_KEY) {
+                    props.as_mut().volume = v.clamp(0.0, 1.0);
+                }
+            }
             if let Some(stream) = stream_of(h) {
                 stream.set_volume(v.clamp(0.0, 1.0));
             }

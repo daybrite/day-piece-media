@@ -13,7 +13,7 @@ function setup() {
     element.pause = () => { element.paused = true; element.dispatchEvent(new Event('pause')); };
     element.load = () => { element.loaded = true; element.dispatchEvent(new Event('emptied')); };
     element.removeAttribute = name => { element.removed = name; };
-    const bridge = runInNewContext(`${arm}\n({attach_media, set_volume, stop_media})`, {
+    const bridge = runInNewContext(`${arm}\n({attach_media, set_volume, stop_media, seek_media, rate_media, poll_media, play_media})`, {
         dayHost: { dom: {
             element: () => element,
             emit: (...args) => reports.push(args),
@@ -69,4 +69,38 @@ test('volume is a clamped property and release silences callbacks before unloadi
     assert.equal(element.paused, true);
     assert.equal(element.loaded, true);
     assert.equal(element.removed, 'src');
+});
+
+const ranges = values => ({length: values.length, start: i => values[i][0], end: i => values[i][1]});
+test('timeline preserves live ranges and unknown duration', () => {
+    const {element, reports, bridge} = setup();
+    element.currentTime = 42; element.duration = Infinity; element.playbackRate = 1.25;
+    element.seekable = ranges([[20,30],[40,60]]); element.buffered = ranges([[41,45]]);
+    bridge.poll_media(3);
+    const timeline = JSON.parse(reports.at(-1)[2]);
+    assert.equal(timeline.duration, null);
+    assert.equal(timeline.position, 42);
+    assert.equal(timeline.rate, 1.25);
+    assert.equal(timeline.seekable.length, 2);
+    assert.deepEqual(timeline.buffered, [{start:41,end:45}]);
+});
+test('seek clamps into available windows without starting paused playback', () => {
+    const {element, reports, bridge} = setup();
+    element.paused = true; element.seekable = ranges([[20,30],[40,60]]);
+    bridge.seek_media(3, 38); assert.equal(element.currentTime,40); assert.equal(element.paused,true);
+    bridge.seek_media(3, 900); assert.equal(element.currentTime,60);
+    bridge.seek_media(3, NaN); assert.equal(element.currentTime,60);
+    element.seekable = ranges([]);
+    bridge.seek_media(3, 10); assert.deepEqual(reports.at(-1),[3,8,'seek:unsupported']);
+});
+test('rate is persistent across play and pause; rejected autoplay is observable', async () => {
+    const {element,reports,bridge} = setup();
+    element.paused = true;
+    bridge.rate_media(3,1.25);
+    assert.equal(element.playbackRate,1.25); assert.equal(element.defaultPlaybackRate,1.25);
+    assert.equal(element.paused,true);
+    bridge.rate_media(3,0); assert.equal(element.playbackRate,1.25);
+    element.play = () => Promise.reject({name:'NotAllowedError'});
+    bridge.play_media(3); await Promise.resolve();
+    assert.deepEqual(reports.at(-1),[3,8,'play:NotAllowedError']);
 });

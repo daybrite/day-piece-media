@@ -40,6 +40,11 @@ use day_pieces::{FractionSource, IntoFraction, IntoText, TextSource};
 use day_reactive::{Signal, Trigger, untrack, watch};
 use day_spec::Event;
 
+mod session;
+pub use session::{AudioSession, BackgroundAudio, PlaybackSnapshot};
+mod timeline;
+pub use timeline::{MediaCapabilities, MediaError, MediaErrorKind, MediaTimeline, TimeRange};
+
 pub const KIND: &str = "day.piece.media";
 
 /// Full props (realize). The initial `url` loads when the native view is created; the flags are
@@ -92,6 +97,14 @@ pub enum MediaPatch {
     Stop,
     /// Set the output volume, `0.0..=1.0` (from `.volume(…)` changing).
     Volume(f64),
+    /// Seek to an absolute position in seconds. Does not change paused/playing intent.
+    Seek(f64),
+    /// Positive playback speed (0.25–4); unsupported speeds report a command error.
+    Rate(f64),
+    /// Request current timeline/capabilities. Used internally by the observation timer.
+    Poll,
+    /// Configure host background playback. Text is supplied already localized by the app.
+    Background(BackgroundAudio),
 }
 
 /// What the native player is doing, as reported through [`Media::state`].
@@ -150,6 +163,8 @@ pub mod report {
     /// an ICY `StreamTitle` (`Artist - Title`) or the ID3/timed fields packed
     /// `title\u{1f}artist\u{1f}album`, which [`StreamMetadata::from_report`] parses.
     pub const METADATA: i32 = 6;
+    pub const TIMELINE: i32 = 7;
+    pub const COMMAND_ERROR: i32 = 8;
 }
 
 /// What the stream says it is playing, as the arm delivered it and as parsed for display.
@@ -231,6 +246,10 @@ pub struct Media {
     load: Option<Trigger>,
     state: Option<Signal<PlaybackState>>,
     metadata: Option<Signal<Option<StreamMetadata>>>,
+    timeline: Option<Signal<MediaTimeline>>,
+    error: Option<Signal<Option<MediaError>>>,
+    seek: Option<(Signal<f64>, Trigger)>,
+    rate: Option<Signal<f64>>,
 }
 
 /// `media(url)`: a native audio/video player for `url` (a string, `Signal<String>`, or closure;
@@ -255,6 +274,10 @@ pub fn media<M>(url: impl IntoText<M>) -> Media {
         load: None,
         state: None,
         metadata: None,
+        timeline: None,
+        error: None,
+        seek: None,
+        rate: None,
     }
 }
 
@@ -318,6 +341,26 @@ impl Media {
         self.state = Some(state);
         self
     }
+    /// Observe the native timeline and source-dependent capabilities, approximately 4 Hz.
+    pub fn timeline(mut self, timeline: Signal<MediaTimeline>) -> Self {
+        self.timeline = Some(timeline);
+        self
+    }
+    /// Observe structured command and playback failures; native diagnostics are not UI text.
+    pub fn error(mut self, error: Signal<Option<MediaError>>) -> Self {
+        self.error = Some(error);
+        self
+    }
+    /// Seek to the signal's current seconds when the trigger fires (not on every slider tick).
+    pub fn seek(mut self, seconds: Signal<f64>, trigger: Trigger) -> Self {
+        self.seek = Some((seconds, trigger));
+        self
+    }
+    /// Desired playback speed, preserved across pause/resume. Observe `timeline.rate` for actual speed.
+    pub fn rate(mut self, rate: Signal<f64>) -> Self {
+        self.rate = Some(rate);
+        self
+    }
     /// Receive what the stream says it is playing (docs/media.md). `None` until the stream
     /// says anything, and again on every load. Where the native player surfaces the stream's
     /// own metadata (AVFoundation's timed metadata on macOS and iOS: ICY `StreamTitle` and
@@ -347,6 +390,10 @@ impl Media {
             load,
             state,
             metadata,
+            timeline,
+            error,
+            seek,
+            rate,
         } = self;
         let initial = MediaProps {
             url: url.initial(),
@@ -411,6 +458,15 @@ impl Media {
                 move || load.track(),
                 move |_, _| {
                     let url = untrack(|| read());
+                    if let Some(sink) = timeline {
+                        sink.set(MediaTimeline::default());
+                    }
+                    if let Some(sink) = error {
+                        sink.set(None);
+                    }
+                    if let Some(sink) = metadata {
+                        sink.set(None);
+                    }
                     if let Some(p) = &probe {
                         p.start(url.clone());
                     }
@@ -425,11 +481,68 @@ impl Media {
                 move |v, _| send(MediaPatch::Volume(*v)),
             );
         }
+        if let Some((seconds, trigger)) = seek {
+            watch(
+                move || trigger.track(),
+                move |_, _| {
+                    let value = seconds.get_untracked();
+                    if value.is_finite() && value >= 0.0 {
+                        send(MediaPatch::Seek(value));
+                    } else if let Some(error) = error {
+                        error.set(Some(MediaError::invalid("seek")));
+                    }
+                },
+            );
+        }
+        if timeline.is_some()
+            && cfg!(any(
+                feature = "appkit",
+                feature = "uikit",
+                feature = "gtk",
+                feature = "qt",
+                feature = "mdc",
+                feature = "xaml",
+                feature = "arkui",
+                feature = "dom"
+            ))
+        {
+            let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let cleanup = alive.clone();
+            day_reactive::Scope::current()
+                .on_cleanup(move || cleanup.store(false, std::sync::atomic::Ordering::Release));
+            poll_node(day_core::rnode_to_id(node), alive);
+        }
         // The readback rail: every arm reports its player's state on this node's Custom channel.
         // A cross-boundary Custom (JNI, C-ABI, ArkTS, wasm) carries only `num`/`text`, so the
         // code is the discriminator, never the tag.
         cx.on(node, move |ev| {
             if let Event::Custom { num, text, .. } = ev {
+                if *num as i32 == report::TIMELINE {
+                    if let (Some(sink), Some(value)) = (timeline, MediaTimeline::decode(text)) {
+                        sink.set_if_changed(value);
+                    }
+                    return;
+                }
+                if *num as i32 == report::COMMAND_ERROR {
+                    if let Some(sink) = error {
+                        sink.set(Some(MediaError::command(text)));
+                    }
+                    return;
+                }
+                if *num as i32 == report::ERROR
+                    && let Some(sink) = error
+                {
+                    sink.set(Some(MediaError {
+                        kind: MediaErrorKind::Playback,
+                        operation: "playback".into(),
+                        detail: text.clone(),
+                    }));
+                }
+                if *num as i32 == report::IDLE
+                    && let Some(sink) = timeline
+                {
+                    sink.set_if_changed(MediaTimeline::default());
+                }
                 if *num as i32 == report::METADATA {
                     if let Some(metadata) = metadata {
                         let next = StreamMetadata::from_report(text);
@@ -448,6 +561,18 @@ impl Media {
                 }
             }
         });
+        if let Some(rate) = rate {
+            let apply = move |value: f64| {
+                if valid_rate(value) {
+                    send(MediaPatch::Rate(value));
+                } else if let Some(error) = error {
+                    error.set(Some(MediaError::invalid("rate")));
+                }
+            };
+            // Native players may still be preparing; each backend retains desired speed.
+            apply(rate.get_untracked());
+            watch(move || rate.get(), move |value, _| apply(*value));
+        }
         node
     }
 }
@@ -504,6 +629,10 @@ pub trait MediaBuilder: Sized {
     fn load(self, trigger: Trigger) -> Self;
     fn state(self, state: Signal<PlaybackState>) -> Self;
     fn metadata(self, metadata: Signal<Option<StreamMetadata>>) -> Self;
+    fn timeline(self, timeline: Signal<MediaTimeline>) -> Self;
+    fn error(self, error: Signal<Option<MediaError>>) -> Self;
+    fn seek(self, seconds: Signal<f64>, trigger: Trigger) -> Self;
+    fn rate(self, rate: Signal<f64>) -> Self;
 }
 
 impl MediaBuilder for Media {
@@ -542,6 +671,18 @@ impl MediaBuilder for Media {
     }
     fn metadata(self, metadata: Signal<Option<StreamMetadata>>) -> Self {
         Media::metadata(self, metadata)
+    }
+    fn timeline(self, value: Signal<MediaTimeline>) -> Self {
+        Media::timeline(self, value)
+    }
+    fn error(self, value: Signal<Option<MediaError>>) -> Self {
+        Media::error(self, value)
+    }
+    fn seek(self, value: Signal<f64>, trigger: Trigger) -> Self {
+        Media::seek(self, value, trigger)
+    }
+    fn rate(self, value: Signal<f64>) -> Self {
+        Media::rate(self, value)
     }
 }
 
@@ -584,6 +725,43 @@ impl<Inner: MediaBuilder + day_pieces::prelude::Piece> MediaBuilder
     fn metadata(self, metadata: Signal<Option<StreamMetadata>>) -> Self {
         self.map_inner(|inner_piece| inner_piece.metadata(metadata))
     }
+    fn timeline(self, value: Signal<MediaTimeline>) -> Self {
+        self.map_inner(|p| p.timeline(value))
+    }
+    fn error(self, value: Signal<Option<MediaError>>) -> Self {
+        self.map_inner(|p| p.error(value))
+    }
+    fn seek(self, value: Signal<f64>, trigger: Trigger) -> Self {
+        self.map_inner(|p| p.seek(value, trigger))
+    }
+    fn rate(self, value: Signal<f64>) -> Self {
+        self.map_inner(|p| p.rate(value))
+    }
+}
+
+fn valid_rate(rate: f64) -> bool {
+    rate.is_finite() && (0.25..=4.0).contains(&rate)
+}
+
+// Scope cancellation also protects against IDs reused after an entire host restart.
+fn poll_node(id: day_spec::NodeId, active: std::sync::Arc<std::sync::atomic::AtomicBool>) {
+    day_reactive::on_main_delayed(250, move || {
+        if !active.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
+        let alive = day_core::try_with_tree(|tree| {
+            let node = day_core::id_to_rnode(id);
+            if !tree.node_exists(node) {
+                return false;
+            }
+            tree.patch(node, Box::new(MediaPatch::Poll), false);
+            true
+        })
+        .unwrap_or(false);
+        if alive {
+            poll_node(id, active);
+        }
+    });
 }
 
 #[cfg(test)]

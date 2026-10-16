@@ -8,6 +8,10 @@ day_bridge::bridge! {
         fn attach_media(id: i32, volume: f64, muted: bool);
         fn set_volume(id: i32, volume: f64);
         fn stop_media(id: i32);
+        fn seek_media(id: i32, seconds: f64);
+        fn rate_media(id: i32, rate: f64);
+        fn poll_media(id: i32);
+        fn play_media(id: i32);
     }
     #[day_bridge::impl(js, platforms = [web])]
     js!(r#"
@@ -28,8 +32,52 @@ day_bridge::bridge! {
             const el = dayHost.dom.element(id);
             if (el) unload(el);
         }
+        function play_media(id) {
+            const el = dayHost.dom.element(id);
+            if (!el) return;
+            const source = el.currentSrc || el.src;
+            el.play()?.catch(error => {
+                if (!el.dayMediaReleased && (el.currentSrc || el.src) === source && error.name !== 'AbortError')
+                    dayHost.dom.emit(id, 8, 'play:' + error.name);
+            });
+        }
+        function seek_media(id, seconds) {
+            const el = dayHost.dom.element(id);
+            if (!el || !Number.isFinite(seconds) || seconds < 0) return;
+            let target = null;
+            for (let i = 0; i < el.seekable.length; i++) {
+                const candidate = Math.max(el.seekable.start(i), Math.min(el.seekable.end(i), seconds));
+                if (target === null || Math.abs(candidate - seconds) < Math.abs(target - seconds)) target = candidate;
+            }
+            if (target === null) { dayHost.dom.emit(id, 8, 'seek:unsupported'); return; }
+            try { el.currentTime = target; } catch (error) { dayHost.dom.emit(id, 8, 'seek:' + error.name); }
+        }
+        function rate_media(id, rate) {
+            const el = dayHost.dom.element(id);
+            if (!el || !Number.isFinite(rate) || rate < .25 || rate > 4) return;
+            try { el.defaultPlaybackRate = rate; el.playbackRate = rate; }
+            catch (error) { dayHost.dom.emit(id, 8, 'rate:' + error.name); }
+        }
+        function poll_media(id) {
+            const el = dayHost.dom.element(id);
+            if (!el) return;
+            const ranges = value => {
+                const result = [];
+                if (value) for (let i = 0; i < value.length; i++) result.push({start: value.start(i), end: value.end(i)});
+                return result;
+            };
+            const seekable = ranges(el.seekable);
+            dayHost.dom.emit(id, 7, JSON.stringify({
+                position: Number.isFinite(el.currentTime) ? Math.max(0, el.currentTime) : 0,
+                duration: Number.isFinite(el.duration) ? el.duration : null,
+                rate: el.playbackRate || 1, seeking: !!el.seeking,
+                seekable, buffered: ranges(el.buffered),
+                capabilities: {seek: seekable.length > 0, rate: true, volume: true}
+            }));
+        }
         function attach_media(id, volume, muted) {
             const el = dayHost.dom.element(id);
+            el.dayMediaReleased = false;
             // A `muted` attribute only counts when the parser sets it; a script sets the property.
             el.muted = !!muted;
             set_volume(id, volume);
@@ -51,6 +99,7 @@ day_bridge::bridge! {
                 if (code !== 1) report(5, message);
             });
             dayHost.dom.onRelease(id, () => {
+                el.dayMediaReleased = true;
                 for (const [name, handler] of handlers) el.removeEventListener(name, handler);
                 unload(el);
             });
@@ -62,6 +111,14 @@ day_bridge::bridge! {
     fn set_volume(id: i32, volume: f64) { let _ = (id, volume); }
     #[day_bridge::impl(rust, platforms = [other])]
     fn stop_media(id: i32) { let _ = id; }
+    #[day_bridge::impl(rust, platforms = [other])]
+    fn seek_media(id: i32, seconds: f64) { let _ = (id, seconds); }
+    #[day_bridge::impl(rust, platforms = [other])]
+    fn rate_media(id: i32, rate: f64) { let _ = (id, rate); }
+    #[day_bridge::impl(rust, platforms = [other])]
+    fn poll_media(id: i32) { let _ = id; }
+    #[day_bridge::impl(rust, platforms = [other])]
+    fn play_media(id: i32) { let _ = id; }
 }
 pub(crate) fn attach(id: i32, volume: f64, muted: bool) {
     attach_media(id, volume, muted);
@@ -71,4 +128,17 @@ pub(crate) fn volume(id: i32, value: f64) {
 }
 pub(crate) fn stop(id: i32) {
     stop_media(id);
+}
+
+pub(crate) fn seek(id: i32, value: f64) {
+    seek_media(id, value);
+}
+pub(crate) fn rate(id: i32, value: f64) {
+    rate_media(id, value);
+}
+pub(crate) fn poll(id: i32) {
+    poll_media(id);
+}
+pub(crate) fn play(id: i32) {
+    play_media(id);
 }

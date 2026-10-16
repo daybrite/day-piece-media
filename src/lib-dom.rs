@@ -75,9 +75,13 @@ fn update(backend: &mut Dom, h: &DomHandle, patch: &MediaPatch) {
             // `load()` re-reads the new src; `play()` then starts it, matching `.load()`'s
             // documented "reload and play" behavior on the native arms.
             backend.call(h, "load");
-            backend.call(h, "play");
+            super::browser::play(h.0 as i32);
         }
-        MediaPatch::Play => backend.call(h, "play"),
+        MediaPatch::Seek(value) => super::browser::seek(h.0 as i32, *value),
+        MediaPatch::Rate(value) => super::browser::rate(h.0 as i32, *value),
+        MediaPatch::Background(_) => {}
+        MediaPatch::Poll => super::browser::poll(h.0 as i32),
+        MediaPatch::Play => super::browser::play(h.0 as i32),
         MediaPatch::Pause => backend.call(h, "pause"),
         // Removing the source and re-loading is what makes the element let its connection go
         // (a paused live stream keeps buffering); the `emptied` event reports the Idle. It goes

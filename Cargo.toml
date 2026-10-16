@@ -47,12 +47,14 @@ mock = []
 # into an app build (Tier A.2), so an app depends on this piece with a plain `{ workspace = true }`,
 # with no per-backend feature fan-out in its Cargo.toml.
 [package.metadata.day]
-compat = "0.4"
+compat = "0.5"
 
 [package.metadata.day.piece]
 backends = ["appkit", "gtk", "qt", "uikit", "mdc", "xaml", "winui", "arkui", "dom", "mock"]
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 day-bridge = { git = "https://github.com/daybrite/day.git" }
 day-spec = { git = "https://github.com/daybrite/day.git" }
 day-core = { git = "https://github.com/daybrite/day.git" }
@@ -97,7 +99,8 @@ day-mock = { git = "https://github.com/daybrite/day.git" }
 # Java and declares the Android permissions it needs, without touching day-android or the scaffold.
 [package.metadata.day.android]
 # Java/Kotlin sources, relative to this crate root: dirs, or single files linked in by package.
-java = ["src/DayMedia.java"]
+java = ["src/DayMedia.java", "src/DayMediaService.java"]
+manifest-components = ["platform/android/components.xml"]
 # Gradle dependency coordinates added to the app module. android.widget.VideoView + MediaController
 # are framework widgets, so no extra dependency is required (androidx.media3/ExoPlayer is the later
 # upgrade for reliable HLS/DASH playback, via this same key).
@@ -106,12 +109,13 @@ gradle-dependencies = []
 gradle-repositories = []
 # Android manifest <uses-permission>s the piece needs, merged into the app manifest by `day build`
 # (network media sources need INTERNET; local files need nothing).
-permissions = ["android.permission.INTERNET"]
+permissions = ["android.permission.INTERNET", "android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK", "android.permission.WAKE_LOCK"]
 
 # --- HarmonyOS backend contribution (docs/extending.md) ---
 # The ArkTS half of the piece, staged into the app's hvigor project by `day build`.
 [package.metadata.day.ohos]
 ets = ["platform/harmony/ets"]
+permissions = ["ohos.permission.KEEP_BACKGROUND_RUNNING"]
 
 # --- iOS backend contribution (docs/extending.md) ---
 # The iOS AVPlayerViewController is hand-rolled in Rust (objc2), so there's no Swift shim, but its

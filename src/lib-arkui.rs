@@ -50,6 +50,16 @@ fn update(_backend: &mut ArkUi, h: &AHandle, patch: &MediaPatch) {
     let volume;
     let (cmd, arg) = match patch {
         MediaPatch::Load(u) => ("load", u.as_str()),
+        MediaPatch::Seek(v) => {
+            volume = v.to_string();
+            ("seek", volume.as_str())
+        }
+        MediaPatch::Rate(v) => {
+            volume = v.to_string();
+            ("rate", volume.as_str())
+        }
+        MediaPatch::Background(_) => ("background", ""),
+        MediaPatch::Poll => ("poll", ""),
         MediaPatch::Play => ("play", ""),
         MediaPatch::Pause => ("pause", ""),
         MediaPatch::Stop => ("stop", ""),

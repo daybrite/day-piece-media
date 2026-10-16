@@ -21,6 +21,9 @@ use day_spec::{NodeId, Proposal, Size};
 const MEDIA_CLASS: &str = "dev/daybrite/day/piece/media/DayMedia";
 
 fn make(_backend: &mut Android, p: &MediaProps, id: NodeId) -> AHandle {
+    make_player(p, id)
+}
+fn make_player(p: &MediaProps, id: NodeId) -> AHandle {
     with_env(|env| {
         let url = env.new_string(&p.url).expect("url");
         let view = env
@@ -49,9 +52,20 @@ fn make(_backend: &mut Android, p: &MediaProps, id: NodeId) -> AHandle {
 }
 
 fn update(_backend: &mut Android, h: &AHandle, patch: &MediaPatch) {
+    command(h, patch);
+}
+fn command(h: &AHandle, patch: &MediaPatch) {
     // Commands cross as (code, url, value): 0=load, 1=play, 2=pause, 3=stop, 4=volume.
+    let background;
     let (code, url, value) = match patch {
         MediaPatch::Load(u) => (0, u.as_str(), 0.0),
+        MediaPatch::Seek(v) => (5, "", *v),
+        MediaPatch::Rate(v) => (6, "", *v),
+        MediaPatch::Background(value) => {
+            background = serde_json::to_string(value).unwrap_or_default();
+            (8, background.as_str(), 0.0)
+        }
+        MediaPatch::Poll => (7, "", 0.0),
         MediaPatch::Play => (1, "", 0.0),
         MediaPatch::Pause => (2, "", 0.0),
         MediaPatch::Stop => (3, "", 0.0),
@@ -93,6 +107,9 @@ fn measure(backend: &mut Android, h: &AHandle, proposal: Proposal) -> Size {
 
 /// Release the MediaPlayer a sound-only view carries; a VideoView releases its own.
 fn release(_backend: &mut Android, h: &AHandle) {
+    release_player(h);
+}
+fn release_player(h: &AHandle) {
     with_env(|env| {
         let _ = env.dcall_static(
             MEDIA_CLASS,
@@ -106,3 +123,40 @@ fn release(_backend: &mut Android, h: &AHandle) {
 day_pieces::renderer!(day_android::RENDERERS, Android,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);
+
+/// Application-context player retained directly by AudioSession, outside Day's activity tree.
+/// Node zero selects a private report queue instead of the UI event router.
+pub(crate) struct SessionPlayer(AHandle);
+impl SessionPlayer {
+    pub(crate) fn new(props: &MediaProps) -> Self {
+        Self(make_player(props, NodeId(0)))
+    }
+    pub(crate) fn command(&self, patch: &MediaPatch) {
+        command(&self.0, patch);
+    }
+    pub(crate) fn reports(&self) -> Vec<(i32, String)> {
+        with_env(|env| {
+            let object = env
+                .dcall_static(
+                    MEDIA_CLASS,
+                    "sessionReports",
+                    "(Landroid/view/View;)Ljava/lang/String;",
+                    &[JValue::Object(self.0.0.as_obj())],
+                )
+                .ok()
+                .and_then(|v| v.l().ok());
+            let Some(object) = object else {
+                return Vec::new();
+            };
+            let text = env
+                .dstr(&day_android::as_jstring(object))
+                .unwrap_or_default();
+            serde_json::from_str(&text).unwrap_or_default()
+        })
+    }
+}
+impl Drop for SessionPlayer {
+    fn drop(&mut self) {
+        release_player(&self.0);
+    }
+}

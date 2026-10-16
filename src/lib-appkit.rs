@@ -20,26 +20,26 @@ use std::ptr::null_mut;
 
 use day_appkit::AppKit;
 use day_spec::{NodeId, Proposal, Size};
+use objc2::AnyThread;
 use objc2::rc::Retained;
+use objc2::runtime::ProtocolObject;
 use objc2::runtime::{AnyObject, NSObjectProtocol};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::NSView;
-use objc2::AnyThread;
-use objc2::runtime::ProtocolObject;
+use objc2_av_foundation::NSValueAVFoundationExtensions;
 use objc2_av_foundation::{
     AVMetadataCommonIdentifierAlbumName, AVMetadataCommonIdentifierArtist,
-    AVMetadataCommonIdentifierTitle, AVMetadataIdentifierIcyMetadataStreamTitle,
-    AVPlayerItemMetadataOutput, AVPlayerItemMetadataOutputPushDelegate,
-    AVPlayerItemOutputPushDelegate, AVPlayerItemTrack, AVTimedMetadataGroup,
-    AVPlayer, AVPlayerItem, AVPlayerItemDidPlayToEndTimeNotification,
-    AVPlayerItemFailedToPlayToEndTimeNotification, AVPlayerItemStatus, AVPlayerTimeControlStatus,
+    AVMetadataCommonIdentifierTitle, AVMetadataIdentifierIcyMetadataStreamTitle, AVPlayer,
+    AVPlayerItem, AVPlayerItemDidPlayToEndTimeNotification,
+    AVPlayerItemFailedToPlayToEndTimeNotification, AVPlayerItemMetadataOutput,
+    AVPlayerItemMetadataOutputPushDelegate, AVPlayerItemOutputPushDelegate, AVPlayerItemStatus,
+    AVPlayerItemTrack, AVPlayerTimeControlStatus, AVTimedMetadataGroup,
 };
 use objc2_av_kit::{AVPlayerView, AVPlayerViewControlsStyle};
-use objc2_core_media::kCMTimeZero;
+use objc2_core_media::{CMTime, kCMTimeZero};
 use objc2_foundation::{
-    NSArray,
-    NSKeyValueObservingOptions, NSNotificationCenter, NSObject, NSObjectNSKeyValueObserverRegistration,
-    NSString, NSURL,
+    NSArray, NSKeyValueObservingOptions, NSNotificationCenter, NSObject,
+    NSObjectNSKeyValueObserverRegistration, NSString, NSURL,
 };
 
 /// The KVO key paths the observer registers for. `currentItem.status` reaches through to
@@ -130,7 +130,12 @@ define_class!(
 );
 
 impl MediaObserver {
-    fn new(mtm: MainThreadMarker, player: Retained<AVPlayer>, node: NodeId, looping: bool) -> Retained<Self> {
+    fn new(
+        mtm: MainThreadMarker,
+        player: Retained<AVPlayer>,
+        node: NodeId,
+        looping: bool,
+    ) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(ObserverIvars {
             player,
             node,
@@ -225,10 +230,7 @@ define_class!(
             groups: &NSArray<AVTimedMetadataGroup>,
             _track: Option<&AVPlayerItemTrack>,
         ) {
-            log::debug!(
-                "day-piece-media: {} timed metadata group(s)",
-                groups.len()
-            );
+            log::debug!("day-piece-media: {} timed metadata group(s)", groups.len());
             if let Some(text) = metadata_text(groups) {
                 day_appkit::emit(
                     self.ivars().node,
@@ -258,12 +260,10 @@ impl MetadataDelegate {
 /// The `report::METADATA` payload for a batch of timed groups: an ICY `StreamTitle` as it
 /// came, else the ID3/common title, artist, and album packed for [`StreamMetadata::from_report`].
 fn metadata_text(groups: &NSArray<AVTimedMetadataGroup>) -> Option<String> {
-    groups
-        .iter()
-        .find_map(|group| {
-            let items = unsafe { group.items() };
-            items_text(&items)
-        })
+    groups.iter().find_map(|group| {
+        let items = unsafe { group.items() };
+        items_text(&items)
+    })
 }
 
 /// The same, for one batch of items (a group's, or the item's `timedMetadata`).
@@ -339,6 +339,13 @@ fn state_of(player: &AVPlayer) -> (i32, String) {
             .unwrap_or_else(|| "playback failed".into());
         return (report::ERROR, text);
     }
+    // AVPlayer sends a final paused KVO notification as well as the end notification.
+    // Preserve Ended once the finite item has reached its end.
+    let position = unsafe { player.currentTime().seconds() };
+    let duration = unsafe { item.duration().seconds() };
+    if duration.is_finite() && duration > 0.0 && position >= duration - 0.01 {
+        return (report::ENDED, String::new());
+    }
     match unsafe { player.timeControlStatus() } {
         AVPlayerTimeControlStatus::Playing => (report::PLAYING, String::new()),
         AVPlayerTimeControlStatus::WaitingToPlayAtSpecifiedRate => (report::LOADING, String::new()),
@@ -375,12 +382,7 @@ fn media_url(source: &str) -> Option<Retained<NSURL>> {
     }
 }
 
-fn load_url(
-    player: &AVPlayer,
-    source: &str,
-    metadata: &MetadataDelegate,
-    mtm: MainThreadMarker,
-) {
+fn load_url(player: &AVPlayer, source: &str, metadata: &MetadataDelegate, mtm: MainThreadMarker) {
     let Some(url) = media_url(source) else {
         return;
     };
@@ -446,6 +448,42 @@ fn update(backend: &mut AppKit, h: &Retained<NSView>, patch: &MediaPatch) {
         return;
     };
     match patch {
+        MediaPatch::Background(_) => {}
+        MediaPatch::Poll => {
+            let timeline = timeline_of(&player);
+            LIVE.with(|m| {
+                if let Some(live) = m.borrow().get(&key_of(h)) {
+                    live.observer.report(report::TIMELINE, timeline.encode());
+                }
+            });
+        }
+        MediaPatch::Seek(seconds) => {
+            let timeline = timeline_of(&player);
+            if let Some(target) = timeline.seek_target(*seconds) {
+                unsafe {
+                    player.seekToTime_toleranceBefore_toleranceAfter(
+                        CMTime::with_seconds(target, 1_000_000),
+                        kCMTimeZero,
+                        kCMTimeZero,
+                    );
+                }
+            } else {
+                LIVE.with(|m| {
+                    if let Some(live) = m.borrow().get(&key_of(h)) {
+                        live.observer
+                            .report(report::COMMAND_ERROR, "seek:unsupported".into());
+                    }
+                });
+            }
+        }
+        MediaPatch::Rate(rate) => unsafe {
+            if valid_rate(*rate) {
+                player.setDefaultRate(*rate as f32);
+                if player.rate() != 0.0 {
+                    player.setRate(*rate as f32);
+                }
+            }
+        },
         MediaPatch::Load(url) => {
             load_url(&player, url, &metadata, backend.mtm());
             unsafe { player.play() };
@@ -488,3 +526,39 @@ fn release(_backend: &mut AppKit, h: &Retained<NSView>) {
 day_pieces::renderer!(day_appkit::RENDERERS, AppKit,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);
+
+fn timeline_of(player: &AVPlayer) -> MediaTimeline {
+    let mut value = MediaTimeline::default();
+    unsafe {
+        value.rate = player.defaultRate() as f64;
+        value.capabilities.volume = true;
+        let Some(item) = player.currentItem() else {
+            return value;
+        };
+        let position = player.currentTime().seconds();
+        value.position = if position.is_finite() {
+            position.max(0.0)
+        } else {
+            0.0
+        };
+        let duration = item.duration().seconds();
+        value.duration = (duration.is_finite() && duration >= 0.0).then_some(duration);
+        let ranges = |values: Retained<NSArray<objc2_foundation::NSValue>>| -> Vec<TimeRange> {
+            values
+                .iter()
+                .filter_map(|v| {
+                    let r = v.CMTimeRangeValue();
+                    let start = r.start.seconds();
+                    let end = start + r.duration.seconds();
+                    (start.is_finite() && end.is_finite() && start >= 0.0 && end >= start)
+                        .then_some(TimeRange { start, end })
+                })
+                .collect()
+        };
+        value.seekable = ranges(item.seekableTimeRanges());
+        value.buffered = ranges(item.loadedTimeRanges());
+        value.capabilities.seek = !value.seekable.is_empty();
+        value.capabilities.rate = item.status() == AVPlayerItemStatus::ReadyToPlay;
+    }
+    value
+}

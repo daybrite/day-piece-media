@@ -1,0 +1,1 @@
+<service android:name="dev.daybrite.day.piece.media.DayMediaService" android:exported="false" android:foregroundServiceType="mediaPlayback" />

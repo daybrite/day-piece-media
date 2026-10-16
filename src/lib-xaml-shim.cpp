@@ -41,7 +41,11 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
+#include <sstream>
+#include <locale>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -79,8 +83,9 @@ static winrt::hstring hs(const char *s) {
     int len = MultiByteToWideChar(CP_UTF8, 0, s, -1, nullptr, 0);
     if (len <= 1)
         return winrt::hstring{};
-    std::wstring w(static_cast<size_t>(len - 1), L'\0');
+    std::wstring w(static_cast<size_t>(len), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, s, -1, w.data(), len);
+    w.resize(static_cast<size_t>(len - 1));
     return winrt::hstring{w};
 }
 
@@ -90,8 +95,9 @@ static std::string utf8(const winrt::hstring &h) {
     int len = WideCharToMultiByte(CP_UTF8, 0, h.c_str(), -1, nullptr, 0, nullptr, nullptr);
     if (len <= 1)
         return std::string{};
-    std::string s(static_cast<size_t>(len - 1), '\0');
+    std::string s(static_cast<size_t>(len), '\0');
     WideCharToMultiByte(CP_UTF8, 0, h.c_str(), -1, s.data(), len, nullptr, nullptr);
+    s.resize(static_cast<size_t>(len - 1));
     return s;
 }
 
@@ -148,7 +154,7 @@ static void wire_state(const WMP::MediaPlayer &player, uint64_t id, const Stoppe
                 report(id, 2);
                 break;
             case WMP::MediaPlaybackState::Paused:
-                report(id, 3);
+                report(id, session.NaturalDuration().count() > 0 && session.Position() >= session.NaturalDuration() ? 4 : 3);
                 break;
             }
         });
@@ -252,6 +258,49 @@ void day_media_xaml_set_volume(void *handle, double volume) {
             p.Volume(volume);
     } catch (...) {
     }
+}
+void day_media_xaml_seek(void *handle, double seconds) {
+    try {
+        if (auto p = player_of(handle)) {
+            auto session = p.PlaybackSession();
+            if (!session.CanSeek()) { report(g_info.at(handle).id, 8, "seek:unsupported"); return; }
+            if (std::isfinite(seconds) && seconds >= 0) {
+                double end = session.NaturalDuration().count() / 10000000.0;
+                session.Position(WF::TimeSpan{static_cast<int64_t>(std::min(seconds, end) * 10000000)});
+            }
+        }
+    } catch (...) { report(g_info.at(handle).id, 8, "seek:failed"); }
+}
+void day_media_xaml_rate(void *handle, double rate) {
+    try {
+        if (auto p = player_of(handle))
+            if (std::isfinite(rate) && rate >= .25 && rate <= 4) p.PlaybackSession().PlaybackRate(rate);
+    } catch (...) { report(g_info.at(handle).id, 8, "rate:unsupported"); }
+}
+void day_media_xaml_poll(void *handle) {
+    auto it = g_info.find(handle);
+    if (it == g_info.end()) return;
+    try {
+        if (auto p = player_of(handle)) {
+            auto session = p.PlaybackSession();
+            double duration = session.NaturalDuration().count() / 10000000.0;
+            bool seek = session.CanSeek() && duration > 0;
+            std::ostringstream json;
+            json.imbue(std::locale::classic());
+            json << "{\"position\":" << session.Position().count() / 10000000.0 << ",\"duration\":";
+            if (duration > 0) json << duration; else json << "null";
+            json << ",\"rate\":" << session.PlaybackRate() << ",\"seekable\":[";
+            if (seek) json << "{\"start\":0,\"end\":" << duration << "}";
+            json << "],\"capabilities\":{\"seek\":" << (seek ? "true" : "false")
+                 << ",\"rate\":true,\"volume\":true}}";
+            report(it->second.id, 7, json.str());
+        } else { report(it->second.id, 5, "the media player could not be created"); }
+    } catch (...) { report(it->second.id, 8, "poll:failed"); }
+}
+void day_media_xaml_release(void *handle) {
+    set_stopped(handle, true);
+    try { if (auto p = player_of(handle)) { p.Pause(); p.Source(nullptr); p.Close(); } } catch (...) {}
+    g_info.erase(handle);
 }
 int day_media_xaml_is_audio_only(void *handle) {
     auto it = g_info.find(handle);

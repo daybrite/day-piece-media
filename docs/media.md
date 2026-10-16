@@ -55,7 +55,8 @@ Autoplay defaults to true, but browser policy may block audible playback until a
 
 A video fills its allocated space. `.audio_only(true)` creates an invisible player that measures
 zero, useful when an app provides its own audio controls. `.controls()` has no effect there.
-There is no portable seek API; native transport controls may provide a timeline.
+Use `.timeline(signal)`, `.seek(seconds_signal, trigger)`, and `.rate(rate_signal)` for
+portable timing and transport; native controls remain available.
 
 The player writes the bound state signal when its engine reports a change:
 
@@ -71,6 +72,108 @@ The player writes the bound state signal when its engine reports a change:
 `PlaybackState::is_active()` is true for Loading and Playing. State changes also reflect actions
 in the native controls. Renderers translate platform callbacks into `Event::Custom` reports;
 the front end decodes them into the signal. Apps do not need to handle those events directly.
+
+## Application-owned audio
+
+`AudioSession` is a cloneable UI-thread handle. Create it after the Day host starts and retain
+it in `Ambient::app()` state, as the demo does. It has no visible piece to mount. Removing a
+page or closing a secondary window drops that view's controls, not the shared player. Dropping
+the last handle or calling `stop()` releases the player and its source. Application exit, OS
+process termination, and browser document closure still end playback.
+
+```rust
+use day_piece_media::AudioSession;
+
+let audio = AudioSession::new();
+let observed = audio.snapshot();
+audio.load("https://example.com/episode.mp3", false)?;
+audio.set_volume(0.7)?;
+audio.set_rate(1.25)?;
+audio.play();
+// Once observed.get().timeline.capabilities.seek is true:
+audio.seek(60.0)?;
+```
+
+`load(source, autoplay)` accepts local paths and engine-supported URLs, including Android
+`content://` URIs. The app must acquire and retain document-provider permissions itself. Other
+platforms likewise require the app to retain any security-scoped file access. The browser uses
+served URLs or app-managed object URLs, not arbitrary local paths. The demo copies bundled
+fixtures using generated `res::assets` accessors.
+
+Every load creates a fresh native event target (a private report queue on Android). The
+snapshot's `generation` changes on load/stop and `sequence` advances with observations. Delayed
+end, error, and metadata events from an old source cannot advance a new queue item. Queue,
+playlist, retry, podcast download, persistence and resume-position policy remain app concerns.
+`Media` stays view-owned; use `AudioSession` when you need this source-generation guarantee.
+
+On Android the handle retains an application-context MediaPlayer directly, outside the Day
+activity tree. Its report queue and UI-thread observation timer survive appearance/language
+recreation. Other renderers use an unattached native player node with a detached reactive scope.
+
+## Timeline, seeking and speed
+
+```rust
+use day_piece_media::MediaTimeline;
+let timeline = Signal::new(MediaTimeline::default());
+let seconds = Signal::new(10.0);
+let seek = Trigger::new();
+let rate = Signal::new(1.0);
+media(url).timeline(timeline).seek(seconds, seek).rate(rate)
+```
+
+Timeline values use seconds and refresh approximately four times per second. `duration: None`
+means unknown or unbounded, not zero. `seekable` can describe a moving live/DVR window or
+multiple ranges. `seek_target` clamps into the nearest available range; an empty range list or
+`capabilities.seek == false` rejects seeking. Seek completion is asynchronous and preserves
+paused/playing intent. Use observed position to confirm it, not the command return value.
+
+`rate` reports the configured nonzero playback speed even while paused. Inputs must be finite
+and in `0.25..=4.0`; individual engines/sources can accept a smaller set. Requested speed is
+retained across pause/resume and session source replacement. Native command rejection appears
+through `.error(signal)` or `snapshot.error`. `Result::Ok` means the command was accepted for
+dispatch, not that asynchronous preparation, seeking or a speed change succeeded.
+
+Errors separate invalid input, unsupported operations, playback failures and other command
+failures. `operation` and `detail` are diagnostic identifiers/text: log them and map to generated
+localized app messages. Do not display engine diagnostic strings as app UI. A new load clears
+previous errors and observations.
+
+| Backend | Timeline and seek | Speed | Buffered ranges |
+|---|---|---|---|
+| AppKit / UIKit | AVPlayer time, duration and native seekable ranges | AVPlayer default/current rate | Native loaded ranges |
+| Android MDC | MediaPlayer time/duration; seek for finite sources | PlaybackParams on API 23+, preserving pause | Buffer-percentage estimate for finite sources |
+| GTK | GtkMediaStream timestamp/duration and seekability | Unsupported by GTK API; reports an error | Unavailable |
+| Qt | QMediaPlayer position/duration and seekability | QMediaPlayer playback rate | Unavailable |
+| Windows XAML / WinUI | MediaPlaybackSession position/duration and CanSeek | MediaPlaybackSession playback rate | Unavailable |
+| Harmony ArkUI | Video/AVPlayer time and finite duration | 0.75, 1, 1.25, 1.75, 2 | Unavailable |
+| Web DOM | HTMLMediaElement time/duration and native TimeRanges | Browser playbackRate limits apply | Native TimeRanges |
+
+Empty buffered ranges mean the backend has no observation, not necessarily that the stream has
+no buffer. A capability is specific to the loaded source and platform, not a codec-installation
+guarantee. Gapless transitions and normalization currently report false on every backend;
+this API does not claim a sample-accurate queue or a DSP/limiter pipeline.
+
+## Background audio
+
+Call `audio.background(BackgroundAudio { title, description, channel_name })` before loading
+from a user action. Format those presentation strings on the UI thread with your generated
+`res::str` accessors (see `Demo::create`). This opts into mobile background execution:
+
+- Android contributes a non-exported media-playback foreground service, permissions and a wake
+  lock. It manages audio focus, transient interruptions, ducking and headphone removal. A manual
+  pause cancels automatic resume. The notification stops when no opted-in player is active.
+  Start from an eligible foreground user action; OS background-start restrictions still apply.
+- UIKit uses the playback audio-session category, reactivates on play, and handles interruptions
+  and disconnected output routes. Add `audio` to the app's `UIBackgroundModes`; the demo does.
+- Harmony creates an AVSession and an audio continuous task, shared across opted-in players.
+  The crate contributes `KEEP_BACKGROUND_RUNNING`; the app's ability must declare
+  `backgroundModes: ["audioPlayback"]`. The demo keeps a customized native host for this entry.
+  Devices without the continuous-task system capability report a background command failure.
+- Desktop playback remains bound to the app process. Browsers control tab suspension and audible
+  autoplay; a service worker cannot keep this audio session alive after document closure.
+
+System transport controls, rich lock-screen metadata and media-library integration are separate
+extensions. The Android foreground notification currently provides a route back into the app.
 
 ## Stream metadata
 
@@ -127,8 +230,7 @@ the next play or load.
 - UIKit configures the process audio session for playback. Background audio additionally needs
   the app's `UIBackgroundModes` audio entry. The embedded controller currently supports inline
   playback; fullscreen presentation is not implemented.
-- Android uses framework players. ExoPlayer/Media3, media sessions, and lock-screen controls are
-  not included. Plain HTTP may require app-level cleartext configuration.
+- Android uses framework players. ExoPlayer/Media3 and system transport controls are not included. Plain HTTP may require app-level cleartext configuration.
 - GTK requires a media backend and codecs. Homebrew GTK has none, so it displays a playback
   error. GtkVideo's transport overlay cannot be hidden.
 - Qt builds a URL-label fallback when Qt Multimedia is absent. Its player has no transport
@@ -153,6 +255,6 @@ the next play or load.
 backend. The live ICY probe test is ignored by default because it requires a network station.
 `node --test tests/browser.mjs` checks event mapping, volume, and listener cleanup.
 
-The [demo](../demo/README.md) bundles a generated clip and exercises play, pause, stop, reload,
-and state readback. Run its dayscript on a platform with a working media engine. The shared CI
+The [demo](../demo/README.md) bundles a generated clip and tone, exercises timing and transport,
+and verifies shared-session ownership and source replacement. Run its dayscript on a platform with a working media engine. The shared CI
 workflow builds the app and runs the same script on its configured targets.

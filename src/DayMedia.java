@@ -11,7 +11,17 @@
 package dev.daybrite.day.piece.media;
 
 import android.media.AudioAttributes;
+import android.media.AudioManager;
+import android.media.AudioFocusRequest;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.BroadcastReceiver;
+import android.os.PowerManager;
 import android.media.MediaPlayer;
+import android.media.PlaybackParams;
+import org.json.JSONObject;
+import org.json.JSONArray;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
@@ -41,10 +51,78 @@ public final class DayMedia {
     /** Everything a live player carries: the node it reports to and its MediaPlayer. */
     private static final class Live {
         final long id;
+        final JSONArray sessionReports = new JSONArray();
         final boolean audioOnly;
         final boolean looping;
         final boolean muted;
         float volume;
+        float rate = 1f;
+        float appliedRate = 1f;
+        int bufferedPercent;
+        boolean seeking;
+        JSONObject background;
+        boolean active;
+        boolean resumeAfterFocus;
+        AudioFocusRequest focusRequest;
+        AudioManager.OnAudioFocusChangeListener focusListener;
+        BroadcastReceiver noisy;
+        boolean focusHeld;
+        AudioManager audioManager() { return (AudioManager) DayBridge.ctx.getApplicationContext().getSystemService(Context.AUDIO_SERVICE); }
+        boolean acquireFocus() {
+            if (focusHeld) return true;
+            AudioManager manager = audioManager();
+            focusListener = change -> {
+                MediaPlayer mp = audioOnly ? player : videoPlayer;
+                if (mp == null || !prepared) return;
+                try {
+                    if (change == AudioManager.AUDIOFOCUS_GAIN) {
+                        applyVolume(mp);
+                        if (resumeAfterFocus) { resumeAfterFocus = false; playWhenReady = true; mp.start(); report(PLAYING, ""); }
+                    } else if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK) {
+                        mp.setVolume(muted ? 0f : volume * .2f, muted ? 0f : volume * .2f);
+                    } else {
+                        resumeAfterFocus = change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT && mp.isPlaying();
+                        mp.pause();
+                        report(PAUSED, "");
+                        if (change == AudioManager.AUDIOFOCUS_LOSS) { resumeAfterFocus = false; playWhenReady = false; abandonFocus(); }
+                    }
+                } catch (IllegalStateException ignored) {}
+            };
+            int result;
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                focusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                    .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+                    .setOnAudioFocusChangeListener(focusListener, MAIN).build();
+                result = manager.requestAudioFocus(focusRequest);
+            } else result = manager.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
+            focusHeld = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+            if (!focusHeld) report(8, "play:audio-focus-denied");
+            if (focusHeld && noisy == null) {
+                noisy = new BroadcastReceiver() {
+                    @Override public void onReceive(Context context, Intent intent) {
+                        MediaPlayer mp = audioOnly ? player : videoPlayer;
+                        resumeAfterFocus = false;
+                        playWhenReady = false;
+                        if (mp != null && prepared) { mp.pause(); report(PAUSED, ""); }
+                        abandonFocus();
+                    }
+                };
+                Context context = DayBridge.ctx.getApplicationContext();
+                if (android.os.Build.VERSION.SDK_INT >= 33) context.registerReceiver(noisy,
+                    new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), Context.RECEIVER_NOT_EXPORTED);
+                else context.registerReceiver(noisy, new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY));
+            }
+            return focusHeld;
+        }
+        void abandonFocus() {
+            if (focusHeld) {
+                if (android.os.Build.VERSION.SDK_INT >= 26 && focusRequest != null) audioManager().abandonAudioFocusRequest(focusRequest);
+                else if (focusListener != null) audioManager().abandonAudioFocus(focusListener);
+            }
+            focusHeld = false;
+            if (noisy != null) { DayBridge.ctx.getApplicationContext().unregisterReceiver(noisy); noisy = null; }
+        }
         /** The sound-only player; a VideoView owns its own MediaPlayer and this stays null. */
         MediaPlayer player;
         /** Whether the current source has finished preparing (so a play is a real start). */
@@ -62,7 +140,17 @@ public final class DayMedia {
         }
 
         void report(int code, String text) {
-            DayBridge.nativeOnEvent(id, K_CUSTOM, (double) code, text == null ? "" : text);
+            if (code <= ERROR) {
+                boolean next = code == PLAYING || code == LOADING || (code == PAUSED && resumeAfterFocus);
+                if (active != next) { active = next; updateBackgroundService(); }
+                if (code == IDLE || code == ENDED || code == ERROR) abandonFocus();
+            }
+            if (id == 0) {
+                // Drained by the Rust session timer, independent of activity/tree generations.
+                JSONArray event = new JSONArray();
+                event.put(code); event.put(text == null ? "" : text);
+                sessionReports.put(event);
+            } else DayBridge.nativeOnEvent(id, K_CUSTOM, (double) code, text == null ? "" : text);
         }
 
         void applyVolume(MediaPlayer mp) {
@@ -73,6 +161,29 @@ public final class DayMedia {
 
     // Weak keys: a released view must not pin itself here.
     private static final Map<View, Live> LIVE = new WeakHashMap<>();
+
+    static boolean hasBackgroundPlayback() {
+        for (Live live : LIVE.values()) if (live.audioOnly && live.background != null && live.active) return true;
+        return false;
+    }
+    private static void updateBackgroundService() {
+        Context context = DayBridge.ctx.getApplicationContext();
+        for (Live live : LIVE.values()) {
+            if (!live.audioOnly || live.background == null || !live.active) continue;
+            Intent intent = new Intent(context, DayMediaService.class)
+                .putExtra("title", live.background.optString("title"))
+                .putExtra("description", live.background.optString("description"))
+                .putExtra("channel", live.background.optString("channel_name"));
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent);
+                else context.startService(intent);
+            } catch (RuntimeException error) {
+                live.report(8, "background:" + error.getClass().getSimpleName());
+            }
+            return;
+        }
+        context.stopService(new Intent(context, DayMediaService.class));
+    }
 
     /** Where a source is opened and an old player torn down. `setDataSource` on an http URI
      *  resolves and connects before returning, and `reset`/`release` wait on the same socket:
@@ -105,12 +216,34 @@ public final class DayMedia {
         }
     }
 
+    /** An unplayed video must not steal focus from application-owned audio when a page mounts. */
+    private static final class MediaVideoView extends VideoView {
+        private final Live live;
+        MediaVideoView(Context context, Live live) {
+            super(context);
+            this.live = live;
+            if (android.os.Build.VERSION.SDK_INT >= 26) setAudioFocusRequest(AudioManager.AUDIOFOCUS_NONE);
+        }
+        @Override public void start() {
+            if (!live.acquireFocus()) return;
+            super.start();
+            if (isPlaying()) live.report(PLAYING, "");
+        }
+        @Override public void pause() {
+            super.pause();
+            live.resumeAfterFocus = false;
+            live.abandonFocus();
+            live.report(PAUSED, "");
+        }
+        @Override public void stopPlayback() { live.abandonFocus(); super.stopPlayback(); }
+    }
+
     public static View makeMedia(
             long id, String url, boolean autoplay, boolean looping, boolean muted,
             boolean controls, boolean audioOnly, double volume) {
         final Live live = new Live(id, audioOnly, looping, muted, (float) volume);
         if (audioOnly) {
-            View host = new View(DayBridge.ctx);
+            View host = new View(DayBridge.ctx.getApplicationContext());
             host.setVisibility(View.GONE);
             LIVE.put(host, live);
             if (url != null && !url.isEmpty()) {
@@ -118,7 +251,7 @@ public final class DayMedia {
             }
             return host;
         }
-        VideoView video = new VideoView(DayBridge.ctx);
+        VideoView video = new MediaVideoView(DayBridge.ctx, live);
         LIVE.put(video, live);
         if (controls) {
             MediaController mc = new MediaController(DayBridge.ctx);
@@ -130,10 +263,14 @@ public final class DayMedia {
         video.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
             @Override
             public void onPrepared(MediaPlayer mp) {
+                mp.setWakeMode(DayBridge.ctx.getApplicationContext(), PowerManager.PARTIAL_WAKE_LOCK);
                 mp.setLooping(live.looping);
                 live.applyVolume(mp);
                 live.prepared = true;
                 live.videoPlayer = mp;
+                mp.setOnSeekCompleteListener(p -> { live.seeking = false; });
+                mp.setOnBufferingUpdateListener((p, percent) -> { live.bufferedPercent = percent; });
+                applyRate(live, mp);
                 // VideoView invokes this callback before applying a queued start(). Read the
                 // final state on the next UI turn, after its internal preparation finishes.
                 video.post(() -> {
@@ -186,7 +323,12 @@ public final class DayMedia {
         final MediaPlayer mp = new MediaPlayer();
         live.player = mp;
         live.prepared = false;
+        live.bufferedPercent = 0;
+        live.seeking = false;
         live.playWhenReady = playWhenReady;
+        mp.setWakeMode(DayBridge.ctx.getApplicationContext(), PowerManager.PARTIAL_WAKE_LOCK);
+        mp.setOnSeekCompleteListener(p -> { if (live.player == p) live.seeking = false; });
+        mp.setOnBufferingUpdateListener((p, percent) -> { if (live.player == p) live.bufferedPercent = percent; });
         mp.setAudioAttributes(new AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
@@ -200,7 +342,8 @@ public final class DayMedia {
                     return; // superseded by a later load
                 }
                 live.prepared = true;
-                if (live.playWhenReady) {
+                applyRate(live, p);
+                if (live.playWhenReady && live.acquireFocus()) {
                     p.start();
                     live.report(PLAYING, "");
                 } else {
@@ -266,6 +409,9 @@ public final class DayMedia {
 
     private static void releasePlayer(Live live) {
         final MediaPlayer old = live.player;
+        live.active = false;
+        live.abandonFocus();
+        updateBackgroundService();
         live.player = null;
         live.prepared = false;
         if (old != null) {
@@ -282,10 +428,87 @@ public final class DayMedia {
         }
     }
 
+    // setPlaybackParams can start a paused MediaPlayer. Preserve transport intent explicitly.
+    private static void applyRate(Live live, MediaPlayer player) {
+        if (android.os.Build.VERSION.SDK_INT < 23) {
+            if (live.rate != 1f) live.report(8, "rate:unsupported");
+            return;
+        }
+        try {
+            boolean playing = player.isPlaying();
+            player.setPlaybackParams(new PlaybackParams().setSpeed(live.rate).setPitch(1f));
+            live.appliedRate = player.getPlaybackParams().getSpeed();
+            if (!playing) player.pause();
+        } catch (IllegalArgumentException | IllegalStateException error) {
+            live.report(8, "rate:unsupported");
+        }
+    }
+    private static void poll(Live live) {
+        MediaPlayer mp = live.audioOnly ? live.player : live.videoPlayer;
+        try {
+            JSONObject value = new JSONObject();
+            JSONObject capabilities = new JSONObject();
+            capabilities.put("volume", true);
+            capabilities.put("rate", android.os.Build.VERSION.SDK_INT >= 23 && live.prepared);
+            int duration = mp != null && live.prepared ? mp.getDuration() : -1;
+            capabilities.put("seek", duration > 0);
+            value.put("position", mp != null && live.prepared ? Math.max(0, mp.getCurrentPosition()) / 1000.0 : 0);
+            value.put("duration", duration > 0 ? duration / 1000.0 : JSONObject.NULL);
+            // Android reports speed zero while paused. Expose the last accepted nonzero speed.
+            float actualRate = mp != null && live.prepared && android.os.Build.VERSION.SDK_INT >= 23 ? mp.getPlaybackParams().getSpeed() : 1f;
+            value.put("rate", actualRate > 0 ? actualRate : live.appliedRate);
+            value.put("seeking", live.seeking);
+            JSONArray ranges = new JSONArray();
+            if (duration > 0) ranges.put(new JSONObject().put("start", 0).put("end", duration / 1000.0));
+            value.put("seekable", ranges);
+            JSONArray buffered = new JSONArray();
+            if (duration > 0 && live.bufferedPercent > 0) buffered.put(new JSONObject().put("start", 0).put("end", duration / 1000.0 * live.bufferedPercent / 100.0));
+            value.put("buffered", buffered);
+            value.put("capabilities", capabilities);
+            live.report(7, value.toString());
+        } catch (Exception error) { live.report(8, "poll:" + error.getClass().getSimpleName()); }
+    }
+
+    public static String sessionReports(View view) {
+        Live live = LIVE.get(view);
+        if (live == null) return "[]";
+        poll(live);
+        String result = live.sessionReports.toString();
+        while (live.sessionReports.length() > 0) live.sessionReports.remove(live.sessionReports.length() - 1);
+        return result;
+    }
+
     /** Imperative commands: 0=load (and play), 1=play, 2=pause, 3=stop, 4=volume (`value`). */
     public static void mediaCommand(View view, int code, String url, double value) {
         Live live = LIVE.get(view);
         if (live == null) {
+            return;
+        }
+        if (code == 8) {
+            try { live.background = new JSONObject(url); updateBackgroundService(); }
+            catch (Exception error) { live.report(8, "background:invalid"); }
+            return;
+        }
+        if (code == 2 || code == 3) { live.resumeAfterFocus = false; live.abandonFocus(); }
+        if (code == 1 && live.audioOnly && live.prepared && !live.acquireFocus()) return;
+        if (code == 7) { poll(live); return; }
+        if (code == 6) {
+            if (!Double.isFinite(value) || value < .25 || value > 4) { live.report(8, "rate:invalid"); return; }
+            live.rate = (float) value;
+            MediaPlayer mp = live.audioOnly ? live.player : live.videoPlayer;
+            if (mp != null && live.prepared) applyRate(live, mp);
+            return;
+        }
+        if (code == 5) {
+            MediaPlayer mp = live.audioOnly ? live.player : live.videoPlayer;
+            if (mp == null || !live.prepared || !Double.isFinite(value) || value < 0) { live.report(8, "seek:unsupported"); return; }
+            try {
+                if (mp.getDuration() <= 0) { live.report(8, "seek:unsupported"); return; }
+                int target = (int)Math.min(value * 1000, mp.getDuration());
+                live.seeking = true;
+                if (android.os.Build.VERSION.SDK_INT >= 26) mp.seekTo(target, MediaPlayer.SEEK_CLOSEST);
+                else mp.seekTo(target);
+            } catch (IllegalStateException error) { live.seeking = false; live.report(8, "seek:failed"); }
             return;
         }
         if (view instanceof VideoView) {
@@ -374,6 +597,9 @@ public final class DayMedia {
         if (live == null) {
             return;
         }
+        live.active = false;
+        live.abandonFocus();
+        updateBackgroundService();
         if (view instanceof VideoView) {
             live.prepared = false;
             live.videoPlayer = null;

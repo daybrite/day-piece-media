@@ -11,4 +11,33 @@ state_loading = Loading
 state_playing = Playing
 state_paused = Paused
 state_ended = Ended
-state_error = Playback unavailable: { $reason }
+state_error = Playback unavailable
+
+video_example = Video example
+audio_example = Shared audio example
+new_window = New window
+timeline = { $position } / { $duration } seconds
+timeline_unknown = Duration not yet available
+seek_ten = Seek to 10 seconds
+speed_fast = Speed 1.25×
+speed_normal = Speed 1×
+finish = Play final half-second
+seek_confirmed = Seek observed
+seek_waiting = Waiting for seek
+speed_confirmed = Speed 1.25× observed
+rate_supported = Playback speed supported
+rate_unsupported = Playback speed unavailable
+command_error = The player could not perform the requested operation.
+command_ok = No command errors
+session_hint = This player belongs to the application. Switch examples or open another window while it plays. Use Stop to release it.
+session_start = Play shared clip
+session_replace = Replace with 12-second tone
+source_replaced = Replacement tone loaded
+source_original = Original clip
+background_description = Playing the bundled demonstration audio
+background_channel = Audio playback
+
+seek_ready = Seeking available
+seek_unavailable = Seeking unavailable
+
+switch_appearance = Switch appearance

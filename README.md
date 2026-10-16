@@ -10,9 +10,10 @@ with each platform's native widgets. This crate supplies the player; your app su
 source, transport controls, and presentation.
 
 Use it for a video player, a sound-only stream, or internet radio. It supports play, pause,
-stop, reload, looping, reactive volume, playback-state signals, and stream metadata. Available
-formats and network protocols depend on the platform engine. There is no portable seek API;
-some native controls provide their own timeline.
+stop, reload, looping, reactive volume, seeking, playback speed, native timeline/capability
+observations, structured errors, and stream metadata. `AudioSession` owns a sound-only player
+independently of pages and windows. Available formats and network protocols depend on the
+platform engine; GTK does not expose playback speed.
 
 ## Add it to a Day app
 
@@ -83,17 +84,19 @@ See [the implementation guide](docs/media.md) for details.
 ## Demo and development
 
 [demo/](demo/) plays a generated clip bundled in the repository, with no network dependency.
-Its walkthrough checks playback, pause, stop, and reload against the player state signal.
+Its walkthrough checks playback, pause, seek, speed, completion, source replacement, and
+continued shared audio after its controls are removed. A second Android script checks activity
+recreation. See the [API and capability guide](docs/media.md).
 
 ```sh
 # From this repository, with day/ beside it:
 day patch --local ../day
 cd demo
 day patch --local ../../day --local ..
-day launch -p macos-appkit --script dayscript/walkthrough.yaml
+day launch -t macos-appkit --script dayscript/walkthrough.yaml
 ```
 
-Use `-p macos-qt`, `-p macos-gtk`, `-p ios-uikit`, `-p android-mdc`, `-p web-dom`, or another
+Use `-t macos-qt`, `-p macos-gtk`, `-p ios-uikit`, `-p android-mdc`, `-p web-dom`, or another
 configured target. GTK without a playback backend still builds and launches; its walkthrough
 omits playback assertions on macOS and Windows. Native files are copied into the demo's app
 sandbox; the browser serves the same asset beside the application.

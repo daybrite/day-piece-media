@@ -85,6 +85,9 @@ jobs:
       targets: macos-appkit, linux-gtk, linux-qt, windows-winui, ios-uikit, android-mdc, web-dom, harmony-arkui
       update-day-deps: true
       scripts: dayscript/walkthrough.yaml
+      target-scripts: |
+        android-mdc: dayscript/walkthrough.yaml dayscript/android-lifecycle.yaml
+        macos-appkit, linux-gtk, linux-qt, windows-winui: dayscript/walkthrough.yaml dayscript/shared-window.yaml
       preflight-checks: fmt, clippy, test
       # The Linux players need more than the toolkit the shared workflow installs: GStreamer's
       # codecs for the bundled clip on both, GTK's GStreamer media module, and Qt Multimedia

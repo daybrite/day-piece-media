@@ -1,6 +1,7 @@
 name: media-demo
 description: Play a bundled clip and check the native player's state after each transport action.
 flow:
+  - tap: { id: show-video }
   - wait_for: { id: media-player }
   - assert_visible: { id: media-title }
   - screenshot: media-ready
@@ -14,6 +15,16 @@ flow:
   - screenshot: media-playing
   - tap: { id: media-pause }
   - assert_text: { id: media-state, key: state_paused, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
+  - tap: { id: media-seek }
+  - assert_text: { id: media-seek-result, key: seek_confirmed, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
+  - assert_text: { id: media-state, key: state_paused, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
+  - tap: { id: media-fast }
+  - assert_text: { id: media-rate-result, key: speed_confirmed, skip_on: [gtk, windows-qt, arkui] }
+  - assert_text: { id: media-state, key: state_paused, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
+  - screenshot: media-seek-and-rate
+  - tap: { id: media-normal }
+  - tap: { id: media-finish }
+  - assert_text: { id: media-state, key: state_ended, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
   - set_value: { id: media-volume, value: 0 }
   - tap: { id: media-stop }
   - assert_text: { id: media-state, key: state_idle, skip_on: [macos-gtk, windows-gtk, windows-qt] }
@@ -21,3 +32,28 @@ flow:
   - assert_text: { id: media-state, key: state_playing, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
   - tap: { id: media-stop }
   - screenshot: media-stopped
+  - tap: { id: show-audio }
+  - tap: { id: session-start }
+  - assert_text: { id: session-state, key: state_playing, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
+  - tap: { id: session-pause }
+  - assert_text: { id: session-state, key: state_paused, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
+  - assert_text: { id: session-seek-capability, key: seek_ready, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
+  - tap: { id: session-seek }
+  - assert_text: { id: session-seek-result, key: seek_confirmed, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
+  - tap: { id: session-fast }
+  - assert_text: { id: session-rate-result, key: speed_confirmed, skip_on: [gtk, windows-qt, arkui] }
+  - tap: { id: session-play }
+  - assert_text: { id: session-state, key: state_playing, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
+  # Destroy the audio example's controls. The application-owned player must keep playing.
+  - tap: { id: show-video }
+  - assert_visible: { id: media-player }
+  - assert_text: { id: session-state, key: state_playing, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
+  - screenshot: shared-audio-away-from-controls
+  - tap: { id: show-audio }
+  - tap: { id: session-replace }
+  - assert_text: { id: session-source, key: source_replaced, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
+  - assert_text: { id: session-state, key: state_playing, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
+  - screenshot: shared-audio-replaced
+  - tap: { id: session-stop }
+  - assert_text: { id: session-state, key: state_idle }
+  - screenshot: shared-audio-stopped
