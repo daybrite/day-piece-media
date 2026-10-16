@@ -39,7 +39,32 @@ code and resource localization. The historical extraction results below are reta
 
 ---
 
-# Extraction validation
+# Validation
+
+## CI failure diagnosis — 2026-10-16
+
+[Run 38927269908](https://github.com/daybrite/day-piece-media/actions/runs/38927269908)
+tested `f649d390052ced52ec976d583d47a4b0ac08ce3e` and had two independent failures:
+
+- The XAML and WinUI crate builds, and the WinUI demo build, failed at
+  `lib-xaml-shim.cpp:269`. Windows headers expand `min` even in `std::min(...)`.
+  The shim now calls `(std::min)(...)` to prevent macro expansion. A local C++20
+  syntax check reproduced the failure with the Windows-style macro and passed with
+  the corrected expression. Full MSVC/XAML/WinUI verification requires Windows CI.
+- Chromium passed 47/50 walkthrough steps but failed both paused seeks and completion
+  after seeking near the end. This reproduced locally. The Day CLI's loopback server
+  ignored HTTP Range headers; adding single HTTP byte-range responses in the sibling
+  `day/crates/day-cli/src/web.rs` made the unchanged walkthrough pass **50/50**, with
+  no skips. The server regression tests cover partial response bytes and headers,
+  open-ended/suffix ranges, unsatisfiable requests, complete-file fallbacks, and HEAD.
+  WebKit also passed 50/50 steps. All seven CLI web tests, all eight media browser
+  bridge tests, and Day's full `scripts/ci/check-ready.sh` gate passed.
+
+The Chromium fix is a **Day CLI dependency**, not a media bridge change. CI installs
+the CLI from Day's `main`, so the framework fix must be available there before rerunning
+this media workflow. The local results above do not constitute a passing Windows CI run.
+
+## Historical extraction validation
 
 Local checks used the sibling `day/`, `day-piece-media/`, and Day-Showcase checkouts on macOS.
 The new media repository has no commits; its Git origin is configured but nothing was pushed.

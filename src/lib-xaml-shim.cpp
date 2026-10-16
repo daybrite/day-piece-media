@@ -266,7 +266,8 @@ void day_media_xaml_seek(void *handle, double seconds) {
             if (!session.CanSeek()) { report(g_info.at(handle).id, 8, "seek:unsupported"); return; }
             if (std::isfinite(seconds) && seconds >= 0) {
                 double end = session.NaturalDuration().count() / 10000000.0;
-                session.Position(WF::TimeSpan{static_cast<int64_t>(std::min(seconds, end) * 10000000)});
+                // windows.h defines min as a function-like macro, even when qualified.
+                session.Position(WF::TimeSpan{static_cast<int64_t>((std::min)(seconds, end) * 10000000)});
             }
         }
     } catch (...) { report(g_info.at(handle).id, 8, "seek:failed"); }
