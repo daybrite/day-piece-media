@@ -163,9 +163,32 @@ static void wire_state(const WMP::MediaPlayer &player, uint64_t id, const Stoppe
             report(id, 4);
     });
     player.MediaFailed([id](const WMP::MediaPlayer &, const WMP::MediaPlayerFailedEventArgs &args) {
+        // ErrorMessage is usually empty; the error kind and the HRESULT are what tell a CI log
+        // apart (no audio endpoint, an unsupported container, an unreachable file).
         std::string text = utf8(args.ErrorMessage());
-        report(id, 5, text.empty() ? std::string{"playback failed"} : text);
+        if (text.empty()) {
+            const char *kind = "unknown";
+            switch (args.Error()) {
+            case WMP::MediaPlayerError::Aborted: kind = "aborted"; break;
+            case WMP::MediaPlayerError::NetworkError: kind = "network error"; break;
+            case WMP::MediaPlayerError::DecodingError: kind = "decoding error"; break;
+            case WMP::MediaPlayerError::SourceNotSupported: kind = "source not supported"; break;
+            default: break;
+            }
+            std::ostringstream s;
+            s << "playback failed: " << kind << " (0x" << std::hex << std::uppercase
+              << static_cast<uint32_t>(args.ExtendedErrorCode().value) << ")";
+            text = s.str();
+        }
+        report(id, 5, text);
     });
+}
+
+// A command failure (seek/rate) for a handle; nothing for one already released.
+static void report_command_error(void *handle, const std::string &text) {
+    auto it = g_info.find(handle);
+    if (it != g_info.end())
+        report(it->second.id, 8, text);
 }
 
 static void set_stopped(void *handle, bool on) {
@@ -263,20 +286,20 @@ void day_media_xaml_seek(void *handle, double seconds) {
     try {
         if (auto p = player_of(handle)) {
             auto session = p.PlaybackSession();
-            if (!session.CanSeek()) { report(g_info.at(handle).id, 8, "seek:unsupported"); return; }
+            if (!session.CanSeek()) { report_command_error(handle, "seek:unsupported"); return; }
             if (std::isfinite(seconds) && seconds >= 0) {
                 double end = session.NaturalDuration().count() / 10000000.0;
                 // windows.h defines min as a function-like macro, even when qualified.
                 session.Position(WF::TimeSpan{static_cast<int64_t>((std::min)(seconds, end) * 10000000)});
             }
         }
-    } catch (...) { report(g_info.at(handle).id, 8, "seek:failed"); }
+    } catch (...) { report_command_error(handle, "seek:failed"); }
 }
 void day_media_xaml_rate(void *handle, double rate) {
     try {
         if (auto p = player_of(handle))
             if (std::isfinite(rate) && rate >= .25 && rate <= 4) p.PlaybackSession().PlaybackRate(rate);
-    } catch (...) { report(g_info.at(handle).id, 8, "rate:unsupported"); }
+    } catch (...) { report_command_error(handle, "rate:unsupported"); }
 }
 void day_media_xaml_poll(void *handle) {
     auto it = g_info.find(handle);
@@ -298,9 +321,30 @@ void day_media_xaml_poll(void *handle) {
         } else { report(it->second.id, 5, "the media player could not be created"); }
     } catch (...) { report(it->second.id, 8, "poll:failed"); }
 }
+// Teardown, before day-xaml frees the element, in the order MediaPlayerElement documents for a
+// player the app set itself: pause, drop the source, detach the element (SetMediaPlayer(null)),
+// and only then close the player. Closing it while the element is still bound is what the
+// Showcase hit on the navigation away from its media page: an element that was in the visual
+// tree keeps a presenter on the player, and finalizing that against a closed player fails fast
+// inside XAML, with nothing in the app's own log. If the detach fails the player is left to the
+// refcount, which is what every build before this hook did.
 void day_media_xaml_release(void *handle) {
     set_stopped(handle, true);
-    try { if (auto p = player_of(handle)) { p.Pause(); p.Source(nullptr); p.Close(); } } catch (...) {}
+    try {
+        WUX::UIElement e{nullptr};
+        winrt::copy_from_abi(e, day_xaml_unbox(handle));
+        if (auto mpe = e.try_as<WUXC::MediaPlayerElement>()) {
+            WMP::MediaPlayer p = mpe.MediaPlayer();
+            if (p) {
+                try { p.Pause(); p.Source(nullptr); } catch (...) {}
+            }
+            bool detached = false;
+            try { mpe.SetMediaPlayer(nullptr); detached = true; } catch (...) {}
+            if (p && detached) {
+                try { p.Close(); } catch (...) {}
+            }
+        }
+    } catch (...) {}
     g_info.erase(handle);
 }
 int day_media_xaml_is_audio_only(void *handle) {

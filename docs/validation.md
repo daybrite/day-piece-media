@@ -64,6 +64,36 @@ The Chromium fix is a **Day CLI dependency**, not a media bridge change. CI inst
 the CLI from Day's `main`, so the framework fix must be available there before rerunning
 this media workflow. The local results above do not constitute a passing Windows CI run.
 
+## Windows CI failure diagnosis — 2026-10-16 (afternoon)
+
+Two Windows jobs failed after `fab629a8` landed, with different symptoms:
+
+- **Day-Showcase `windows-winui` and `windows-xaml`** ([run 38931414052](https://github.com/daybrite/Day-Showcase/actions/runs/38931414052))
+  crashed the app the moment the walkthrough navigated from the media page to the webview
+  page: "engine connection lost (os error 10054)", no panic, no WER record. The Showcase
+  commit touched only macOS packaging; between the last green run and this one the only
+  dependencies that moved were `day` (a CLI/packaging commit plus the `remove_subtree`
+  null-parent fix in day-core) and this crate (`3191fb3e` → `fab629a8`). The crash is the new
+  xaml `release` hook: it closed the `MediaPlayer` while the `MediaPlayerElement` was still
+  bound to it, and day-xaml then freed the element. An element that was in the visual tree
+  keeps a presenter on the player, and finalizing it against a closed player fails fast inside
+  XAML. The hook now follows the order MediaPlayerElement documents for an app-owned player:
+  pause, drop the source, `SetMediaPlayer(null)`, then `Close()`. The demo did not crash on the
+  same path because its audio session's element is never inserted into a window.
+- **This repository's `demo / windows-winui`** ([run 38931555892](https://github.com/daybrite/day-piece-media/actions/runs/38931555892))
+  passed 48/50 steps; `session-replace` (the audio session loading the bundled `tone.wav`,
+  a 16-bit PCM mono 22.05 kHz file) reported `MediaFailed` with an empty `ErrorMessage`, so
+  the log only said "playback failed". The same session had just played `sample.mp4`, so the
+  player, the data directory and the file URI path all work on that runner; what differs is an
+  audio-only source (and a 1.25× rate carried over from the previous load). The shim now
+  reports the `MediaPlayerError` kind and the extended HRESULT when the message is empty, so
+  the next run names the cause (for example `0xC00D4E86`, no audio playback device, would point
+  at the hosted runner rather than the piece). The seek/rate error paths also stopped indexing
+  `g_info` with `.at()` inside a `catch`, which would terminate the process for an unknown handle.
+
+Both changes compiled under an MSVC `/Zs` syntax check against the 10.0.26100 cppwinrt
+headers; the Windows runtime verification is CI's.
+
 ## Historical extraction validation
 
 Local checks used the sibling `day/`, `day-piece-media/`, and Day-Showcase checkouts on macOS.
@@ -89,6 +119,26 @@ AppKit, Android, and iOS screenshots were inspected. The phone controls were spl
 rows to avoid clipping. The HarmonyOS emulator also shows incorrect placement of the video
 surface and labels; successful launch should not be read as a clean visual or playback result.
 Windows and Linux builds require their own hosts and were not run locally. CI covers them.
+
+## Windows WinUI follow-up (2026-10-01)
+
+The Windows WinUI job in run 36895719799 failed at the first `wait_for`, after a 20-second
+socket timeout (10060), without a recorded crash. Its build and packages had succeeded.
+Rerunning that job without source changes passed all 15 steps and captured all three images:
+[successful rerun](https://github.com/daybrite/day-piece-media/actions/runs/36895719799/job/110600449966).
+Even on that successful runner, the first UI response took 11.4 seconds.
+
+On Windows 11 ARM64, both the downloaded x64 CI package and a locally built ARM64 debug app
+passed all 15 walkthrough steps, including playback, pause, stop, reload, and screenshots.
+
+A separate experiment suspended only the demo's UI thread for 25 seconds while leaving its
+script server running. The original Day CLI disconnected after 20.3 seconds with the same
+10060 error; the corrected CLI received a successful response at 25 seconds. The correction
+is in Day's CLI, shared by `launch --script` and `drive`: the socket must outwait the engine's
+30-second UI-dispatch allowance, its implicit retries, and any configured longer allowance.
+No media renderer change or skipped playback assertion was needed. The original runner's
+reason for stalling remains unknown; the rerun and experiment establish a timeout defect,
+not a proven MediaPlayer deadlock.
 
 ## Crate, framework, and consumer checks
 
