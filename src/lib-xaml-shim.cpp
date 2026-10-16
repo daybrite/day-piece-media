@@ -20,6 +20,7 @@
 
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Media.Core.h>     // MediaSource
+#include <winrt/Windows.Media.Devices.h>  // Default audio endpoint diagnostics
 #include <winrt/Windows.Media.Playback.h> // MediaPlayer
 // One shim, two XAML stacks (docs/winui.md): windows-xaml builds it against system XAML,
 // windows-winui (DAY_WINUI) against WinUI 3. The namespaces differ; the controls do not.
@@ -44,6 +45,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <iomanip>
 #include <sstream>
 #include <locale>
 #include <cstdint>
@@ -163,24 +165,32 @@ static void wire_state(const WMP::MediaPlayer &player, uint64_t id, const Stoppe
             report(id, 4);
     });
     player.MediaFailed([id](const WMP::MediaPlayer &, const WMP::MediaPlayerFailedEventArgs &args) {
-        // ErrorMessage is usually empty; the error kind and the HRESULT are what tell a CI log
-        // apart (no audio endpoint, an unsupported container, an unreachable file).
-        std::string text = utf8(args.ErrorMessage());
-        if (text.empty()) {
-            const char *kind = "unknown";
-            switch (args.Error()) {
-            case WMP::MediaPlayerError::Aborted: kind = "aborted"; break;
-            case WMP::MediaPlayerError::NetworkError: kind = "network error"; break;
-            case WMP::MediaPlayerError::DecodingError: kind = "decoding error"; break;
-            case WMP::MediaPlayerError::SourceNotSupported: kind = "source not supported"; break;
-            default: break;
-            }
-            std::ostringstream s;
-            s << "playback failed: " << kind << " (0x" << std::hex << std::uppercase
-              << static_cast<uint32_t>(args.ExtendedErrorCode().value) << ")";
-            text = s.str();
+        // ErrorMessage may be empty (as on the hosted Windows runner). Preserve the
+        // native category and HRESULT so codec, file, and audio-device failures can
+        // be distinguished. This is diagnostic text; the demo localizes its UI error.
+        const char *kind = "unknown";
+        switch (args.Error()) {
+        case WMP::MediaPlayerError::Aborted: kind = "aborted"; break;
+        case WMP::MediaPlayerError::NetworkError: kind = "network error"; break;
+        case WMP::MediaPlayerError::DecodingError: kind = "decoding error"; break;
+        case WMP::MediaPlayerError::SourceNotSupported: kind = "source not supported"; break;
+        default: break;
         }
-        report(id, 5, text);
+        std::ostringstream detail;
+        detail.imbue(std::locale::classic());
+        detail << "MediaFailed: " << kind << ", error=" << static_cast<int>(args.Error())
+               << ", HRESULT=0x" << std::hex << std::uppercase << std::setw(8)
+               << std::setfill('0') << static_cast<uint32_t>(args.ExtendedErrorCode().value);
+        try {
+            namespace Devices = winrt::Windows::Media::Devices;
+            auto endpoint = Devices::MediaDevice::GetDefaultAudioRenderId(Devices::AudioDeviceRole::Default);
+            detail << ", default_audio_output=" << (endpoint.empty() ? "missing" : "present");
+        } catch (...) {
+            detail << ", default_audio_output=unknown";
+        }
+        auto message = utf8(args.ErrorMessage());
+        if (!message.empty()) detail << ": " << message;
+        report(id, 5, detail.str());
     });
 }
 

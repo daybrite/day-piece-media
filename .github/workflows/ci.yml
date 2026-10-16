@@ -87,8 +87,13 @@ jobs:
       scripts: dayscript/walkthrough.yaml
       target-scripts: |
         android-mdc: dayscript/walkthrough.yaml dayscript/android-lifecycle.yaml
-        macos-appkit, linux-gtk, linux-qt, windows-winui: dayscript/walkthrough.yaml dayscript/shared-window.yaml
+        macos-appkit, linux-gtk, linux-qt: dayscript/walkthrough.yaml dayscript/shared-window.yaml
+        windows-winui: dayscript/audio-formats.yaml dayscript/walkthrough.yaml dayscript/shared-window.yaml
       preflight-checks: fmt, clippy, test
+      # Audio-only MediaPlayer playback needs Windows audio services and an output
+      # endpoint even at volume zero. Log endpoint availability before the walkthrough.
+      target-setup: |
+        windows-winui: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ci/windows-audio.ps1
       # The Linux players need more than the toolkit the shared workflow installs: GStreamer's
       # codecs for the bundled clip on both, GTK's GStreamer media module, and Qt Multimedia
       # (without it the Qt build falls back to a URL label).

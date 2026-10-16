@@ -41,6 +41,56 @@ code and resource localization. The historical extraction results below are reta
 
 # Validation
 
+## WinUI audio-only failure diagnosis — 2026-10-16
+
+[Job 117077045908](https://github.com/daybrite/day-piece-media/actions/runs/38931555892/job/117077045908)
+builds and packages successfully. The walkthrough passes 48/50 steps: MP4 playback,
+paused seeking, speed changes, natural completion, and shared-session lifetime all pass.
+Only the replacement WAV's duration and Playing assertions fail. `MediaFailed` fires,
+but its `ErrorMessage` is empty, leaving only `playback failed` in the old log.
+
+Both packaged fixtures were downloaded and compared byte-for-byte with this checkout.
+The WAV is valid 12-second, 22,050 Hz, mono, signed 16-bit PCM; its RIFF/data lengths
+are consistent. Missing/corrupt packaged assets are therefore unlikely.
+
+The leading hypothesis is unavailable Windows runner audio output. The MP4 also has
+a video track, so successful MP4 playback does not establish successful audio rendering.
+GitHub's runner-image maintainers [document absent virtual audio hardware](https://github.com/actions/runner-images/issues/6983).
+This remains a hypothesis: the old log discarded the HRESULT needed to confirm it.
+Windows [supports PCM WAV](https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/supported-codecs),
+so replacing the tone with another container or skipping these assertions would obscure
+the failure.
+
+Changes for the next run:
+
+- CI starts `AudioEndpointBuilder` and `Audiosrv`, enabling them if disabled, and logs
+  the default audio endpoint plus sound-device status. Starting services repairs that
+  prerequisite but cannot create a missing device; no virtual driver is installed.
+- Native playback errors retain `MediaPlayerError`, hexadecimal `ExtendedErrorCode`,
+  the message, and whether Windows reports a default output. These are diagnostics;
+  the app's visible error remains localized.
+- `audio-formats.yaml` runs first on WinUI. It loads the WAV at 1x in a fresh app,
+  then tests seeking, 1.25x playback, and MP4/WAV replacement at the retained rate.
+  The existing walkthrough keeps all its assertions.
+
+A manual Windows run with working speakers/headphones is useful. From `demo/`, run:
+
+```powershell
+day launch -t windows-winui --script dayscript/audio-formats.yaml
+day launch -t windows-winui --script dayscript/walkthrough.yaml
+```
+
+If the cold WAV fails, capture the new `MediaFailed` line and try opening
+`resource/assets/tone.wav` in Windows Media Player. If only the replacement fails,
+capture which phase failed and its HRESULT; that points toward replacement or rate
+handling instead of basic WAV/device support. If both scripts pass locally but CI
+reports a missing endpoint, CI needs a Windows runner with an audio render device.
+Neither native WinUI compilation nor the PowerShell service setup can be validated
+on this macOS host; a passing Windows run is still required.
+Local checks passed: the new audio script 24/24 and the original walkthrough 50/50
+on AppKit, with screenshots inspected; workflow actionlint and `git diff --check`
+also passed.
+
 ## CI failure diagnosis — 2026-10-16
 
 [Run 38927269908](https://github.com/daybrite/day-piece-media/actions/runs/38927269908)
