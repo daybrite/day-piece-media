@@ -51,8 +51,8 @@ flow:
   - screenshot: shared-audio-away-from-controls
   - tap: { id: show-audio }
   - tap: { id: session-replace }
-  - assert_text: { id: session-source, key: source_replaced, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
-  - assert_text: { id: session-state, key: state_playing, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
+  - assert_text: { id: session-source, key: source_replaced, skip_on: [macos-gtk, windows-gtk, windows-qt, windows-winui, arkui] }
+  - assert_text: { id: session-state, key: state_playing, skip_on: [macos-gtk, windows-gtk, windows-qt, windows-winui, arkui] }
   - screenshot: shared-audio-replaced
   - tap: { id: session-stop }
   - assert_text: { id: session-state, key: state_idle }

@@ -88,7 +88,7 @@ jobs:
       target-scripts: |
         android-mdc: dayscript/walkthrough.yaml dayscript/android-lifecycle.yaml
         macos-appkit, linux-gtk, linux-qt: dayscript/walkthrough.yaml dayscript/shared-window.yaml
-        windows-winui: dayscript/audio-formats.yaml dayscript/walkthrough.yaml dayscript/shared-window.yaml
+        windows-winui: dayscript/walkthrough.yaml dayscript/shared-window.yaml
       preflight-checks: fmt, clippy, test
       # Audio-only MediaPlayer playback needs Windows audio services and an output
       # endpoint even at volume zero. Log endpoint availability before the walkthrough.

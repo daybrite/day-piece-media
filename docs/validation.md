@@ -144,6 +144,25 @@ Two Windows jobs failed after `fab629a8` landed, with different symptoms:
 Both changes compiled under an MSVC `/Zs` syntax check against the 10.0.26100 cppwinrt
 headers; the Windows runtime verification is CI's.
 
+[Run 38943064080](https://github.com/daybrite/day-piece-media/actions/runs/38943064080) built
+`5aa17110` with those changes: the Showcase-style crash is gone from this demo's teardown paths,
+and the replacement load now reports `playback failed: source not supported (0xC00D36FA)`,
+`MF_E_CANNOT_CREATE_SINK`. Media Foundation could not create the audio renderer, which confirms
+the hypothesis above: the hosted runner has no audio endpoint, and `sample.mp4` played because a
+video branch can resolve without its audio branch.
+
+[Run 38970405945](https://github.com/daybrite/day-piece-media/actions/runs/38970405945) tried
+the remedy of installing Scream, a virtual sound card, from the shared `daybrite/actions` dayapp
+workflow before the app launched. Its `devcon install` printed "Updating drivers for *Scream" and
+never returned; the step sat 77 minutes until the job's limit cancelled it. Scream's driver
+signature expired in July 2023 ([duncanthrax/scream#202](https://github.com/duncanthrax/scream/issues/202))
+and no re-signed build exists, so that step is removed again and the hosted runner stays without
+an audio render device. The Windows leg therefore runs `walkthrough.yaml` and
+`shared-window.yaml` only, with the two assertions after `session-replace` gated by
+`skip_on: [windows-winui]`; `audio-formats.yaml` stays a manual script for a Windows host with a
+playback device. `windows-audio.ps1` still logs the endpoint state before each run, so a runner
+image that gains one will show it in the job log.
+
 ## Historical extraction validation
 
 Local checks used the sibling `day/`, `day-piece-media/`, and Day-Showcase checkouts on macOS.
