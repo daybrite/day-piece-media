@@ -51,7 +51,7 @@ Use the same bare Day Git URL in your app and dependencies. This checkout requir
 | android-mdc | [VideoView](https://developer.android.com/reference/android/widget/VideoView), [MediaPlayer](https://developer.android.com/reference/android/media/MediaPlayer) | Framework APIs, not ExoPlayer. Network sources require INTERNET, contributed by this crate. |
 | linux-gtk, macos-gtk, windows-gtk | [GtkVideo](https://docs.gtk.org/gtk4/class.Video.html), GtkMediaFile | Requires a GTK media backend and codecs. Homebrew GTK has no playback backend; the demo shows its error. |
 | linux-qt, macos-qt, windows-qt | [QMediaPlayer](https://doc.qt.io/qt-6/qmediaplayer.html), QVideoWidget | `Qt6MultimediaWidgets` through pkg-config. Without it, the crate builds a URL-label fallback. Qt provides no transport chrome here. |
-| windows-xaml | [MediaPlayerElement](https://learn.microsoft.com/en-us/uwp/api/windows.ui.xaml.controls.mediaplayerelement) | Windows SDK and MSVC; system media support determines codec availability. |
+| windows-winui | [MediaPlayerElement](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.xaml.controls.mediaplayerelement) | Windows App SDK and MSVC; system media support determines codec availability. |
 | harmony-arkui | [ArkUI Video](https://github.com/openharmony/docs/blob/master/en/application-dev/reference/apis-arkui/arkui-ts/ts-media-components-video.md) and AVPlayer | HarmonyOS/OpenHarmony SDK and an accessible source supported by the engine. |
 | web-dom | [HTML media elements](https://developer.mozilla.org/en-US/docs/Web/API/HTMLMediaElement) | Served URLs, browser codecs and origin policies; audible autoplay is restricted. |
 
