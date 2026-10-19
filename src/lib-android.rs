@@ -12,42 +12,41 @@
 // ---------------------------------------------------------------------------
 
 use super::*;
-use day_android::DayEnv;
-use day_android::jni::objects::JValue;
-use day_android::{AHandle, Android, with_env};
+use day_android::jni::objects::JString;
+use day_android::{AHandle, Android, java, java_string, with_env};
 use day_spec::{NodeId, Proposal, Size};
 
-/// This piece's Java class (src/DayMedia.java, on the app classpath at build).
-const MEDIA_CLASS: &str = "dev/daybrite/day/piece/media/DayMedia";
+// This piece's Java class (src/DayMedia.java, on the app classpath at build).
+day_android::java_class! {
+    DayMedia => dev.daybrite.day.piece.media.DayMedia,
+    methods {
+        static fn makeMedia(id: jlong, url: JString, autoplay: jboolean, looping: jboolean,
+            muted: jboolean, controls: jboolean, audio_only: jboolean, volume: jdouble)
+            -> android.view.View,
+        static fn mediaCommand(view: android.view.View, code: jint, url: JString, value: jdouble),
+        static fn isAudioOnly(view: android.view.View) -> jboolean,
+        static fn releaseMedia(view: android.view.View),
+        static fn sessionReports(view: android.view.View) -> JString,
+    },
+}
 
 fn make(_backend: &mut Android, p: &MediaProps, id: NodeId) -> AHandle {
     make_player(p, id)
 }
 fn make_player(p: &MediaProps, id: NodeId) -> AHandle {
-    with_env(|env| {
-        let url = env.new_string(&p.url).expect("url");
-        let view = env
-            .dcall_static(
-                MEDIA_CLASS,
-                "makeMedia",
-                "(JLjava/lang/String;ZZZZZD)Landroid/view/View;",
-                &[
-                    JValue::Long(id.0 as i64),
-                    JValue::Object(&url),
-                    JValue::Bool(p.autoplay),
-                    JValue::Bool(p.looping),
-                    JValue::Bool(p.muted),
-                    JValue::Bool(p.controls),
-                    JValue::Bool(p.audio_only),
-                    JValue::Double(p.volume.clamp(0.0, 1.0)),
-                ],
-            )
-            .expect("DayMedia.makeMedia")
-            .l()
-            .expect("View");
-        AHandle(std::sync::Arc::new(
-            env.new_global_ref(view).expect("global ref"),
-        ))
+    day_android::realize("media", |env| {
+        let url = JString::from_str(env, &p.url)?;
+        DayMedia::makeMedia(
+            env,
+            id.0 as i64,
+            &url,
+            p.autoplay,
+            p.looping,
+            p.muted,
+            p.controls,
+            p.audio_only,
+            p.volume.clamp(0.0, 1.0),
+        )
     })
 }
 
@@ -71,34 +70,15 @@ fn command(h: &AHandle, patch: &MediaPatch) {
         MediaPatch::Stop => (3, "", 0.0),
         MediaPatch::Volume(v) => (4, "", v.clamp(0.0, 1.0)),
     };
-    with_env(|env| {
-        let s = env.new_string(url).expect("cmd url");
-        let _ = env.dcall_static(
-            MEDIA_CLASS,
-            "mediaCommand",
-            "(Landroid/view/View;ILjava/lang/String;D)V",
-            &[
-                JValue::Object(h.0.as_obj()),
-                JValue::Int(code),
-                JValue::Object(&s),
-                JValue::Double(value),
-            ],
-        );
+    java(|env| {
+        let url = JString::from_str(env, url)?;
+        DayMedia::mediaCommand(env, h.0.as_obj(), code, &url, value)
     });
 }
 
 /// A sound-only player takes no room; a video fills what it is offered.
 fn measure(backend: &mut Android, h: &AHandle, proposal: Proposal) -> Size {
-    let audio_only = with_env(|env| {
-        env.dcall_static(
-            MEDIA_CLASS,
-            "isAudioOnly",
-            "(Landroid/view/View;)Z",
-            &[JValue::Object(h.0.as_obj())],
-        )
-        .and_then(|v| v.z())
-        .unwrap_or(false)
-    });
+    let audio_only = java(|env| DayMedia::isAudioOnly(env, h.0.as_obj())).unwrap_or(false);
     if audio_only {
         return Size::ZERO;
     }
@@ -110,14 +90,7 @@ fn release(_backend: &mut Android, h: &AHandle) {
     release_player(h);
 }
 fn release_player(h: &AHandle) {
-    with_env(|env| {
-        let _ = env.dcall_static(
-            MEDIA_CLASS,
-            "releaseMedia",
-            "(Landroid/view/View;)V",
-            &[JValue::Object(h.0.as_obj())],
-        );
-    });
+    java(|env| DayMedia::releaseMedia(env, h.0.as_obj()));
 }
 
 day_pieces::renderer!(day_android::RENDERERS, Android,
@@ -135,24 +108,11 @@ impl SessionPlayer {
         command(&self.0, patch);
     }
     pub(crate) fn reports(&self) -> Vec<(i32, String)> {
-        with_env(|env| {
-            let object = env
-                .dcall_static(
-                    MEDIA_CLASS,
-                    "sessionReports",
-                    "(Landroid/view/View;)Ljava/lang/String;",
-                    &[JValue::Object(self.0.0.as_obj())],
-                )
-                .ok()
-                .and_then(|v| v.l().ok());
-            let Some(object) = object else {
-                return Vec::new();
-            };
-            let text = env
-                .dstr(&day_android::as_jstring(object))
-                .unwrap_or_default();
-            serde_json::from_str(&text).unwrap_or_default()
+        let text = with_env(|env| {
+            java_string(env, |env| DayMedia::sessionReports(env, self.0.0.as_obj()))
         })
+        .unwrap_or_default();
+        serde_json::from_str(&text).unwrap_or_default()
     }
 }
 impl Drop for SessionPlayer {
