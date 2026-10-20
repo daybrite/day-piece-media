@@ -1,12 +1,12 @@
 name: shared-audio-window
 description: Desktop ownership check. Closing a second window must not release the application audio session.
 flow:
-  - tap: { id: show-audio }
-  - tap: { id: session-start }
-  - assert_text: { id: session-state, key: state_playing, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
-  - tap: { id: new-window }
+  - tap: { id: show_audio }
+  - tap: { id: session_start }
+  - assert_text: { id: session_state, key: state_playing, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
+  - tap: { id: new_window }
   - screenshot: { name: shared-audio-second-window, window: media-extra }
   - close_window: { window: media-extra }
-  - assert_text: { id: session-state, key: state_playing, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
-  - tap: { id: session-stop }
-  - assert_text: { id: session-state, key: state_idle }
+  - assert_text: { id: session_state, key: state_playing, skip_on: [macos-gtk, windows-gtk, windows-qt, arkui] }
+  - tap: { id: session_stop }
+  - assert_text: { id: session_state, key: state_idle }

@@ -98,26 +98,26 @@ fn window_content() -> impl Piece {
         column((
             label(res::str::app_title())
                 .font(Font::Title)
-                .id("media-title"),
+                .id(day::id!(media_title)),
             row((
                 button(res::str::video_example())
                     .action(move || audio_page.set(false))
-                    .id("show-video"),
+                    .id(day::id!(show_video)),
                 button(res::str::audio_example())
                     .action(move || audio_page.set(true))
-                    .id("show-audio"),
+                    .id(day::id!(show_audio)),
             ))
             .spacing(8.0),
             button(res::str::switch_appearance())
                 .action(|| day::set_appearance(Some(!day::dark_mode())))
-                .id("switch-appearance"),
+                .id(day::id!(switch_appearance)),
             button(res::str::new_window())
                 .action(|| {
                     day::open_window(window().key("media-extra"), window_content);
                 })
-                .id("new-window"),
-            label(move || status(snapshot.get().state)).id("session-state"),
-            label(move || timeline_text(snapshot.get().timeline)).id("session-timeline"),
+                .id(day::id!(new_window)),
+            label(move || status(snapshot.get().state)).id(day::id!(session_state)),
+            label(move || timeline_text(snapshot.get().timeline)).id(day::id!(session_timeline)),
             label(move || {
                 if snapshot.get().timeline.capabilities.seek {
                     res::str::seek_ready().format()
@@ -125,7 +125,7 @@ fn window_content() -> impl Piece {
                     res::str::seek_unavailable().format()
                 }
             })
-            .id("session-seek-capability"),
+            .id(day::id!(session_seek_capability)),
             switch(
                 move || audio_page.get(),
                 |audio| {
@@ -168,23 +168,23 @@ fn video_example() -> impl Piece {
             .error(error)
             .seek(seek_position, seek)
             .rate(rate)
-            .id("media-player")
+            .id(day::id!(media_player))
             .height(180.0),
-        label(move || status(state.get())).id("media-state"),
-        label(move || timeline_text(timeline.get())).id("media-timeline"),
+        label(move || status(state.get())).id(day::id!(media_state)),
+        label(move || timeline_text(timeline.get())).id(day::id!(media_timeline)),
         row((
             button(res::str::play())
                 .action(move || play.notify())
-                .id("media-play"),
+                .id(day::id!(media_play)),
             button(res::str::pause())
                 .action(move || pause.notify())
-                .id("media-pause"),
+                .id(day::id!(media_pause)),
             button(res::str::stop())
                 .action(move || stop.notify())
-                .id("media-stop"),
+                .id(day::id!(media_stop)),
             button(res::str::reload())
                 .action(move || reload.notify())
-                .id("media-reload"),
+                .id(day::id!(media_reload)),
         ))
         .spacing(8.0),
         row((button(res::str::seek_ten())
@@ -192,15 +192,15 @@ fn video_example() -> impl Piece {
                 seek_position.set(10.0);
                 seek.notify();
             })
-            .id("media-seek"),))
+            .id(day::id!(media_seek)),))
         .spacing(8.0),
         row((
             button(res::str::speed_fast())
                 .action(move || rate.set(1.25))
-                .id("media-fast"),
+                .id(day::id!(media_fast)),
             button(res::str::speed_normal())
                 .action(move || rate.set(1.0))
-                .id("media-normal"),
+                .id(day::id!(media_normal)),
         ))
         .spacing(8.0),
         row((button(res::str::finish())
@@ -211,7 +211,7 @@ fn video_example() -> impl Piece {
                     play.notify();
                 }
             })
-            .id("media-finish"),))
+            .id(day::id!(media_finish)),))
         .spacing(8.0),
         label(move || {
             if timeline.get().position >= 9.5 {
@@ -220,7 +220,7 @@ fn video_example() -> impl Piece {
                 res::str::seek_waiting().format()
             }
         })
-        .id("media-seek-result"),
+        .id(day::id!(media_seek_result)),
         label(move || {
             if (timeline.get().rate - 1.25).abs() < 0.01 {
                 res::str::speed_confirmed().format()
@@ -228,7 +228,7 @@ fn video_example() -> impl Piece {
                 res::str::speed_normal().format()
             }
         })
-        .id("media-rate-result"),
+        .id(day::id!(media_rate_result)),
         label(move || {
             if timeline.get().capabilities.rate {
                 res::str::rate_supported().format()
@@ -236,7 +236,7 @@ fn video_example() -> impl Piece {
                 res::str::rate_unsupported().format()
             }
         })
-        .id("media-rate-capability"),
+        .id(day::id!(media_rate_capability)),
         label(move || {
             if error.get().is_some() {
                 res::str::command_error().format()
@@ -244,8 +244,11 @@ fn video_example() -> impl Piece {
                 res::str::command_ok().format()
             }
         })
-        .id("media-command-result"),
-        labeled(res::str::volume(), slider(volume).id("media-volume")),
+        .id(day::id!(media_command_result)),
+        labeled(
+            res::str::volume(),
+            slider(volume).id(day::id!(media_volume)),
+        ),
         label(res::str::volume_hint()).font(Font::Footnote),
     ))
     .spacing(10.0)
@@ -270,24 +273,24 @@ fn audio_example() -> impl Piece {
                 .action(move || {
                     command_failed.set(start.load(app.clip.clone(), true).is_err());
                 })
-                .id("session-start"),
+                .id(day::id!(session_start)),
             button(res::str::session_replace())
                 .action(move || {
                     command_failed.set(replace.load(app.tone.clone(), true).is_err());
                 })
-                .id("session-replace"),
+                .id(day::id!(session_replace)),
         ))
         .spacing(8.0),
         row((
             button(res::str::play())
                 .action(move || play.play())
-                .id("session-play"),
+                .id(day::id!(session_play)),
             button(res::str::pause())
                 .action(move || pause.pause())
-                .id("session-pause"),
+                .id(day::id!(session_pause)),
             button(res::str::stop())
                 .action(move || stop.stop())
-                .id("session-stop"),
+                .id(day::id!(session_stop)),
         ))
         .spacing(8.0),
         row((
@@ -295,12 +298,12 @@ fn audio_example() -> impl Piece {
                 .action(move || {
                     command_failed.set(seek.seek(10.0).is_err());
                 })
-                .id("session-seek"),
+                .id(day::id!(session_seek)),
             button(res::str::speed_fast())
                 .action(move || {
                     command_failed.set(rate.set_rate(1.25).is_err());
                 })
-                .id("session-fast"),
+                .id(day::id!(session_fast)),
         ))
         .spacing(8.0),
         label(move || {
@@ -310,7 +313,7 @@ fn audio_example() -> impl Piece {
                 res::str::seek_waiting().format()
             }
         })
-        .id("session-seek-result"),
+        .id(day::id!(session_seek_result)),
         label(move || {
             if (snapshot.get().timeline.rate - 1.25).abs() < 0.01 {
                 res::str::speed_confirmed().format()
@@ -318,7 +321,7 @@ fn audio_example() -> impl Piece {
                 res::str::speed_normal().format()
             }
         })
-        .id("session-rate-result"),
+        .id(day::id!(session_rate_result)),
         label(move || {
             if snapshot.get().timeline.duration.is_some_and(|d| d < 13.0) {
                 res::str::source_replaced().format()
@@ -326,7 +329,7 @@ fn audio_example() -> impl Piece {
                 res::str::source_original().format()
             }
         })
-        .id("session-source"),
+        .id(day::id!(session_source)),
         label(move || {
             if command_failed.get() || snapshot.get().error.is_some() {
                 res::str::command_error().format()
@@ -334,8 +337,11 @@ fn audio_example() -> impl Piece {
                 res::str::command_ok().format()
             }
         })
-        .id("session-command-result"),
-        labeled(res::str::volume(), slider(volume).id("session-volume")),
+        .id(day::id!(session_command_result)),
+        labeled(
+            res::str::volume(),
+            slider(volume).id(day::id!(session_volume)),
+        ),
         label(res::str::volume_hint()).font(Font::Footnote),
     ))
     .spacing(12.0)

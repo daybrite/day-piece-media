@@ -1,20 +1,20 @@
 name: android-audio-recreation
 description: Keep an application-owned audio player through Android activity recreation.
 flow:
-  - tap: { id: show-audio }
-  - tap: { id: session-start }
-  - assert_text: { id: session-state, key: state_playing }
-  - assert_text: { id: session-seek-capability, key: seek_ready }
-  - tap: { id: switch-appearance }
+  - tap: { id: show_audio }
+  - tap: { id: session_start }
+  - assert_text: { id: session_state, key: state_playing }
+  - assert_text: { id: session_seek_capability, key: seek_ready }
+  - tap: { id: switch_appearance }
   # Day rebuilds the whole activity tree after an appearance change. The native audio player,
   # session observers and app-owned handle must survive and the new controls must reconnect.
-  - wait_for: { id: show-audio }
-  - tap: { id: show-audio }
-  - assert_text: { id: session-state, key: state_playing }
-  - tap: { id: session-pause }
-  - assert_text: { id: session-state, key: state_paused }
-  - tap: { id: session-seek }
-  - assert_text: { id: session-seek-result, key: seek_confirmed }
+  - wait_for: { id: show_audio }
+  - tap: { id: show_audio }
+  - assert_text: { id: session_state, key: state_playing }
+  - tap: { id: session_pause }
+  - assert_text: { id: session_state, key: state_paused }
+  - tap: { id: session_seek }
+  - assert_text: { id: session_seek_result, key: seek_confirmed }
   - screenshot: shared-audio-after-recreation
-  - tap: { id: session-stop }
-  - assert_text: { id: session-state, key: state_idle }
+  - tap: { id: session_stop }
+  - assert_text: { id: session_state, key: state_idle }
