@@ -172,7 +172,7 @@ impl AudioSession {
         {
             let (player, probe) = scope.enter(|| {
                 let metadata = Signal::new(None);
-                let probe = icy::Probe::new(metadata);
+                let probe = icy::Probe::new(AnyBinding::new(metadata));
                 probe.start(source.clone());
                 watch(
                     move || metadata.get(),
