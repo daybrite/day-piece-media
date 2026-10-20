@@ -29,10 +29,7 @@ let volume = Signal::new(0.8);
 let state = Signal::new(PlaybackState::Idle);
 
 media(url)
-    .autoplay(false)
-    .looping(false)
-    .muted(false)
-    .controls(true)
+    .no_autoplay()
     .volume(volume)
     .play(play)
     .pause(pause)
@@ -47,16 +44,19 @@ Connect each trigger to a button action, such as `move || play.notify()`. Play r
 current source; pause suspends playback. Stop ends playback; load reads the current URL and
 starts it again. Use load after stop. Volume accepts a constant, signal, or closure returning a
 fraction from zero to one. HarmonyOS video supports mute only; its audio player supports volume.
+The remaining switches are opt-ins: `.looping()` restarts at the end, `.muted()` silences the
+track, and `.no_controls()` hides the toolkit's transport chrome.
 
 The URL accepts a string, signal, or closure. Native engines support local sources and network
 URLs, with formats and protocols determined by the engine. The browser needs a URL it can
 fetch, including a relative URL served with the app. It cannot open arbitrary filesystem paths.
 Autoplay defaults to true, but browser policy may block audible playback until a user gesture.
 
-A video fills its allocated space. `.audio_only(true)` creates an invisible player that measures
-zero, useful when an app provides its own audio controls. `.controls()` has no effect there.
-Use `.timeline(signal)`, `.seek(seconds_signal, trigger)`, and `.rate(rate_signal)` for
-portable timing and transport; native controls remain available.
+A video fills its allocated space. `.audio_only()` creates an invisible player that measures
+zero, useful when an app provides its own audio controls. `.no_controls()` has no effect there.
+Use `.timeline(binding)`, `.seek(seconds_binding, trigger)`, and `.rate(rate_binding)` for
+portable timing and transport; native controls remain available. Every observer and binding
+takes a `Signal` or any other `Binding` (a day-model field).
 
 The player writes the bound state signal when its engine reports a change:
 
@@ -181,7 +181,7 @@ extensions. The Android foreground notification currently provides a route back 
 use day_piece_media::StreamMetadata;
 
 let now: Signal<Option<StreamMetadata>> = Signal::new(None);
-media(url).audio_only(true).metadata(now)
+media(url).audio_only().metadata(now)
 ```
 
 `StreamMetadata` contains `title`, `artist`, `album`, and the original `raw` text. The signal

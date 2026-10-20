@@ -29,14 +29,14 @@ use day_piece_media::{media, PlaybackState};
 let state = Signal::new(PlaybackState::Idle);
 let play = Trigger::new();
 let player = media("https://example.com/video.mp4")
-    .autoplay(false)
+    .no_autoplay()
     .play(play)
     .state(state)
     .height(280.0);
 ```
 
 `day build` enables the renderer for your target and incorporates the crate's native
-contributions. `.audio_only(true)` creates an invisible player; `.volume(signal)` accepts
+contributions. `.audio_only()` creates an invisible player; `.volume(signal)` accepts
 values from zero to one. Use reload to load the source again and resume after stopping.
 
 Use the same bare Day Git URL in your app and dependencies. This checkout requires Day's

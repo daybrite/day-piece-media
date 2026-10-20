@@ -8,12 +8,7 @@ day::resources!();
 day::day_start!(options: window(), root);
 
 pub fn window() -> day::WindowOptions {
-    day::WindowOptions {
-        locales: Some((res::locales::DEFAULT, res::locales::CATALOG)),
-        title_fn: Some(|| res::str::app_title().format()),
-        size: Size::new(860.0, 840.0),
-        ..Default::default()
-    }
+    res::window_options().size(860.0, 840.0)
 }
 
 fn asset_url(asset: day::prelude::AssetName) -> String {
@@ -47,9 +42,11 @@ fn status(state: PlaybackState) -> String {
 }
 fn timeline_text(value: MediaTimeline) -> String {
     match value.duration {
-        Some(duration) => {
-            res::str::timeline(duration.round() as i64, value.position.floor() as i64).format()
-        }
+        Some(duration) => res::str::timeline(res::str::Timeline {
+            duration: duration.round() as i64,
+            position: value.position.floor() as i64,
+        })
+        .format(),
         None => res::str::timeline_unknown().format(),
     }
 }
@@ -116,12 +113,7 @@ fn window_content() -> impl Piece {
                 .id("switch-appearance"),
             button(res::str::new_window())
                 .action(|| {
-                    day::open_window(
-                        Some("media-extra"),
-                        window(),
-                        day::WindowKind::Normal,
-                        window_content,
-                    );
+                    day::open_window(window().key("media-extra"), window_content);
                 })
                 .id("new-window"),
             label(move || status(snapshot.get().state)).id("session-state"),
@@ -134,8 +126,16 @@ fn window_content() -> impl Piece {
                 }
             })
             .id("session-seek-capability"),
-            when(move || !audio_page.get(), video_example),
-            when(move || audio_page.get(), audio_example),
+            switch(
+                move || audio_page.get(),
+                |audio| {
+                    if *audio {
+                        audio_example().any()
+                    } else {
+                        video_example().any()
+                    }
+                },
+            ),
         ))
         .spacing(12.0)
         .padding(20.0),
@@ -157,8 +157,7 @@ fn video_example() -> impl Piece {
     column((
         label(res::str::caption()).font(Font::Footnote),
         media(Demo::app().clip)
-            .autoplay(false)
-            .looping(false)
+            .no_autoplay()
             .volume(volume)
             .play(play)
             .pause(pause)

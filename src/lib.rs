@@ -21,11 +21,11 @@
 //! `.volume(…)` is a tracked fraction (a constant, a `Signal<f64>`, or a closure) patched through
 //! as it changes.
 //!
-//! Playback state comes back through `.state(signal)`: every arm reports what its native player is
+//! Playback state comes back through `.state(binding)`: every arm reports what its native player is
 //! doing (loading, playing, paused, ended, failed) on the piece's `Event::Custom` channel, and the
-//! front-end writes it into the bound `Signal<PlaybackState>`. That is the readback docs/media.md
-//! reserved the channel for: native chrome, the network, and the app's own triggers all move the
-//! player, and the signal is where they agree.
+//! front-end writes it into the bound `PlaybackState` (a `Signal`, or any other `Binding`). That is
+//! the readback docs/media.md reserved the channel for: native chrome, the network, and the app's
+//! own triggers all move the player, and the binding is where they agree.
 //!
 //! Native chrome (`.controls(true)`, the default) is free where the toolkit has it: AVPlayerView's
 //! inline controls, AVPlayerViewController's playback controls, Android's MediaController. Qt's
@@ -36,8 +36,8 @@
 mod browser;
 
 use day_core::{BuildCx, Flex, Piece, RNode, with_tree};
-use day_pieces::{FractionSource, IntoFraction, IntoText, TextSource};
-use day_reactive::{Signal, Trigger, untrack, watch};
+use day_pieces::{Decorated, FractionSource, IntoFraction, IntoText, TextSource};
+use day_reactive::{AnyBinding, Binding, Trigger, untrack, watch};
 use day_spec::Event;
 
 mod session;
@@ -244,12 +244,12 @@ pub struct Media {
     pause: Option<Trigger>,
     stop: Option<Trigger>,
     load: Option<Trigger>,
-    state: Option<Signal<PlaybackState>>,
-    metadata: Option<Signal<Option<StreamMetadata>>>,
-    timeline: Option<Signal<MediaTimeline>>,
-    error: Option<Signal<Option<MediaError>>>,
-    seek: Option<(Signal<f64>, Trigger)>,
-    rate: Option<Signal<f64>>,
+    state: Option<AnyBinding<PlaybackState>>,
+    metadata: Option<AnyBinding<Option<StreamMetadata>>>,
+    timeline: Option<AnyBinding<MediaTimeline>>,
+    error: Option<AnyBinding<Option<MediaError>>>,
+    seek: Option<(AnyBinding<f64>, Trigger)>,
+    rate: Option<AnyBinding<f64>>,
 }
 
 /// `media(url)`: a native audio/video player for `url` (a string, `Signal<String>`, or closure;
@@ -281,32 +281,35 @@ pub fn media<M>(url: impl IntoText<M>) -> Media {
     }
 }
 
+#[day_pieces::builder(MediaBuilder)]
 impl Media {
-    /// Start playing as soon as the media is ready (default true).
-    pub fn autoplay(mut self, autoplay: bool) -> Self {
-        self.autoplay = autoplay;
+    /// Wait for a command instead of playing as soon as the media is ready (the default
+    /// autoplays).
+    pub fn no_autoplay(mut self) -> Self {
+        self.autoplay = false;
         self
     }
-    /// Restart from the beginning when playback reaches the end (default false).
-    pub fn looping(mut self, looping: bool) -> Self {
-        self.looping = looping;
+    /// Restart from the beginning when playback reaches the end (the default plays once).
+    pub fn looping(mut self) -> Self {
+        self.looping = true;
         self
     }
-    /// Silence the audio track (default false).
-    pub fn muted(mut self, muted: bool) -> Self {
-        self.muted = muted;
+    /// Silence the audio track.
+    pub fn muted(mut self) -> Self {
+        self.muted = true;
         self
     }
-    /// Show the toolkit's native transport chrome where it has one (default true). Qt has no free
-    /// chrome (use triggers) and GtkVideo's overlay controls cannot be hidden; see docs/media.md.
-    pub fn controls(mut self, controls: bool) -> Self {
-        self.controls = controls;
+    /// Hide the toolkit's native transport chrome (shown by default where the toolkit has one).
+    /// Qt has no free chrome (use triggers) and GtkVideo's overlay controls cannot be hidden; see
+    /// docs/media.md.
+    pub fn no_controls(mut self) -> Self {
+        self.controls = false;
         self
     }
     /// Sound only: the piece draws nothing, has no chrome, and measures zero, so it can sit
     /// anywhere in the tree while the app draws its own transport (a radio's now-playing bar).
-    pub fn audio_only(mut self, audio_only: bool) -> Self {
-        self.audio_only = audio_only;
+    pub fn audio_only(mut self) -> Self {
+        self.audio_only = true;
         self
     }
     /// Output volume, `0.0..=1.0`: a constant, a `Signal<f64>`, or a closure. A tracked source
@@ -336,29 +339,30 @@ impl Media {
         self
     }
     /// Where the piece writes what the native player is doing. Written on every change the
-    /// toolkit reports, whoever caused it: a trigger, the native chrome, or the network.
-    pub fn state(mut self, state: Signal<PlaybackState>) -> Self {
-        self.state = Some(state);
+    /// toolkit reports, whoever caused it: a trigger, the native chrome, or the network. A
+    /// `Signal<PlaybackState>` or any other binding.
+    pub fn state(mut self, state: impl Binding<PlaybackState>) -> Self {
+        self.state = Some(AnyBinding::new(state));
         self
     }
     /// Observe the native timeline and source-dependent capabilities, approximately 4 Hz.
-    pub fn timeline(mut self, timeline: Signal<MediaTimeline>) -> Self {
-        self.timeline = Some(timeline);
+    pub fn timeline(mut self, timeline: impl Binding<MediaTimeline>) -> Self {
+        self.timeline = Some(AnyBinding::new(timeline));
         self
     }
     /// Observe structured command and playback failures; native diagnostics are not UI text.
-    pub fn error(mut self, error: Signal<Option<MediaError>>) -> Self {
-        self.error = Some(error);
+    pub fn error(mut self, error: impl Binding<Option<MediaError>>) -> Self {
+        self.error = Some(AnyBinding::new(error));
         self
     }
-    /// Seek to the signal's current seconds when the trigger fires (not on every slider tick).
-    pub fn seek(mut self, seconds: Signal<f64>, trigger: Trigger) -> Self {
-        self.seek = Some((seconds, trigger));
+    /// Seek to the binding's current seconds when the trigger fires (not on every slider tick).
+    pub fn seek(mut self, seconds: impl Binding<f64>, trigger: Trigger) -> Self {
+        self.seek = Some((AnyBinding::new(seconds), trigger));
         self
     }
     /// Desired playback speed, preserved across pause/resume. Observe `timeline.rate` for actual speed.
-    pub fn rate(mut self, rate: Signal<f64>) -> Self {
-        self.rate = Some(rate);
+    pub fn rate(mut self, rate: impl Binding<f64>) -> Self {
+        self.rate = Some(AnyBinding::new(rate));
         self
     }
     /// Receive what the stream says it is playing (docs/media.md). `None` until the stream
@@ -368,8 +372,8 @@ impl Media {
     /// second, short-lived connection with `Icy-MetaData: 1` every [`ICY_PROBE_SECS`]
     /// seconds (the same header the players send), read only as far as the first metadata
     /// block. Not available on the web (a page cannot read a cross-origin stream).
-    pub fn metadata(mut self, metadata: Signal<Option<StreamMetadata>>) -> Self {
-        self.metadata = Some(metadata);
+    pub fn metadata(mut self, metadata: impl Binding<Option<StreamMetadata>>) -> Self {
+        self.metadata = Some(AnyBinding::new(metadata));
         self
     }
 }
@@ -612,133 +616,6 @@ mod icy;
 // backend in the gtk4 build (Linux default; Homebrew gtk4 has none, so macos-gtk shows GtkVideo's
 // own error UI; see Cargo.toml + docs/media.md).
 
-// --- Typed builders, forwarded through `Decorated` (docs/api-style.md) ---
-
-/// [`Media`]'s own builders, reachable through a decoration (§5.2): `day_pieces::Decorated` forwards them
-/// to the piece it wraps, so generic modifiers and typed ones chain in any order.
-pub trait MediaBuilder: Sized {
-    fn autoplay(self, autoplay: bool) -> Self;
-    fn looping(self, looping: bool) -> Self;
-    fn muted(self, muted: bool) -> Self;
-    fn controls(self, controls: bool) -> Self;
-    fn audio_only(self, audio_only: bool) -> Self;
-    fn volume<M>(self, volume: impl IntoFraction<M>) -> Self;
-    fn play(self, trigger: Trigger) -> Self;
-    fn pause(self, trigger: Trigger) -> Self;
-    fn stop(self, trigger: Trigger) -> Self;
-    fn load(self, trigger: Trigger) -> Self;
-    fn state(self, state: Signal<PlaybackState>) -> Self;
-    fn metadata(self, metadata: Signal<Option<StreamMetadata>>) -> Self;
-    fn timeline(self, timeline: Signal<MediaTimeline>) -> Self;
-    fn error(self, error: Signal<Option<MediaError>>) -> Self;
-    fn seek(self, seconds: Signal<f64>, trigger: Trigger) -> Self;
-    fn rate(self, rate: Signal<f64>) -> Self;
-}
-
-impl MediaBuilder for Media {
-    fn autoplay(self, autoplay: bool) -> Self {
-        Media::autoplay(self, autoplay)
-    }
-    fn looping(self, looping: bool) -> Self {
-        Media::looping(self, looping)
-    }
-    fn muted(self, muted: bool) -> Self {
-        Media::muted(self, muted)
-    }
-    fn controls(self, controls: bool) -> Self {
-        Media::controls(self, controls)
-    }
-    fn audio_only(self, audio_only: bool) -> Self {
-        Media::audio_only(self, audio_only)
-    }
-    fn volume<M>(self, volume: impl IntoFraction<M>) -> Self {
-        Media::volume(self, volume)
-    }
-    fn play(self, trigger: Trigger) -> Self {
-        Media::play(self, trigger)
-    }
-    fn pause(self, trigger: Trigger) -> Self {
-        Media::pause(self, trigger)
-    }
-    fn stop(self, trigger: Trigger) -> Self {
-        Media::stop(self, trigger)
-    }
-    fn load(self, trigger: Trigger) -> Self {
-        Media::load(self, trigger)
-    }
-    fn state(self, state: Signal<PlaybackState>) -> Self {
-        Media::state(self, state)
-    }
-    fn metadata(self, metadata: Signal<Option<StreamMetadata>>) -> Self {
-        Media::metadata(self, metadata)
-    }
-    fn timeline(self, value: Signal<MediaTimeline>) -> Self {
-        Media::timeline(self, value)
-    }
-    fn error(self, value: Signal<Option<MediaError>>) -> Self {
-        Media::error(self, value)
-    }
-    fn seek(self, value: Signal<f64>, trigger: Trigger) -> Self {
-        Media::seek(self, value, trigger)
-    }
-    fn rate(self, value: Signal<f64>) -> Self {
-        Media::rate(self, value)
-    }
-}
-
-impl<Inner: MediaBuilder + day_pieces::prelude::Piece> MediaBuilder
-    for day_pieces::Decorated<Inner>
-{
-    fn autoplay(self, autoplay: bool) -> Self {
-        self.map_inner(|inner_piece| inner_piece.autoplay(autoplay))
-    }
-    fn looping(self, looping: bool) -> Self {
-        self.map_inner(|inner_piece| inner_piece.looping(looping))
-    }
-    fn muted(self, muted: bool) -> Self {
-        self.map_inner(|inner_piece| inner_piece.muted(muted))
-    }
-    fn controls(self, controls: bool) -> Self {
-        self.map_inner(|inner_piece| inner_piece.controls(controls))
-    }
-    fn audio_only(self, audio_only: bool) -> Self {
-        self.map_inner(|inner_piece| inner_piece.audio_only(audio_only))
-    }
-    fn volume<M>(self, volume: impl IntoFraction<M>) -> Self {
-        self.map_inner(|inner_piece| inner_piece.volume(volume))
-    }
-    fn play(self, trigger: Trigger) -> Self {
-        self.map_inner(|inner_piece| inner_piece.play(trigger))
-    }
-    fn pause(self, trigger: Trigger) -> Self {
-        self.map_inner(|inner_piece| inner_piece.pause(trigger))
-    }
-    fn stop(self, trigger: Trigger) -> Self {
-        self.map_inner(|inner_piece| inner_piece.stop(trigger))
-    }
-    fn load(self, trigger: Trigger) -> Self {
-        self.map_inner(|inner_piece| inner_piece.load(trigger))
-    }
-    fn state(self, state: Signal<PlaybackState>) -> Self {
-        self.map_inner(|inner_piece| inner_piece.state(state))
-    }
-    fn metadata(self, metadata: Signal<Option<StreamMetadata>>) -> Self {
-        self.map_inner(|inner_piece| inner_piece.metadata(metadata))
-    }
-    fn timeline(self, value: Signal<MediaTimeline>) -> Self {
-        self.map_inner(|p| p.timeline(value))
-    }
-    fn error(self, value: Signal<Option<MediaError>>) -> Self {
-        self.map_inner(|p| p.error(value))
-    }
-    fn seek(self, value: Signal<f64>, trigger: Trigger) -> Self {
-        self.map_inner(|p| p.seek(value, trigger))
-    }
-    fn rate(self, value: Signal<f64>) -> Self {
-        self.map_inner(|p| p.rate(value))
-    }
-}
-
 fn valid_rate(rate: f64) -> bool {
     rate.is_finite() && (0.25..=4.0).contains(&rate)
 }
@@ -769,7 +646,7 @@ mod tests {
     use super::*;
     use day_mock::MockToolkit;
     use day_reactive::{Signal, flush_sync};
-    use day_spec::{Size, WindowOptions};
+    use day_spec::WindowOptions;
 
     // Building + driving the piece must never panic, even with no native renderer registered
     // (the mock toolkit realizes unknown kinds as plain widgets and ignores unknown patches,
@@ -786,19 +663,15 @@ mod tests {
 
         day_core::uninstall_tree();
         let (mock, probe) = MockToolkit::new();
-        let options = WindowOptions {
-            title: "test".into(),
-            size: Size::new(400.0, 300.0),
-            ..Default::default()
-        };
+        let options = WindowOptions::default().title("test").size(400.0, 300.0);
         day_core::launch_with(mock, options, move || {
             day_core::AnyPiece::new(
                 media(url)
-                    .autoplay(false)
-                    .looping(true)
-                    .muted(true)
-                    .controls(false)
-                    .audio_only(true)
+                    .no_autoplay()
+                    .looping()
+                    .muted()
+                    .no_controls()
+                    .audio_only()
                     .volume(volume)
                     .play(play)
                     .pause(pause)

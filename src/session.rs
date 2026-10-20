@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 //! A headless native player owned by a Rust handle, independent of window/page trees.
 use super::*;
-use day_reactive::Scope;
+use day_reactive::{Scope, Signal};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -119,14 +119,14 @@ impl AudioSession {
             let error = Signal::new(None);
             let rate = Signal::new(self.0.rate.get());
             let piece = media(source)
-                .audio_only(true)
-                .autoplay(autoplay)
+                .audio_only()
                 .volume(self.0.volume.get())
                 .state(state)
                 .timeline(timeline)
                 .metadata(metadata)
                 .error(error)
                 .rate(rate);
+            let piece = if autoplay { piece } else { piece.no_autoplay() };
             let node = piece.mount(|props| {
                 with_tree(|t| {
                     t.create_node(
@@ -365,7 +365,7 @@ mod tests {
             let session = AudioSession::new();
             session.load("fixture:first.wav", false).unwrap();
             *out.borrow_mut() = Some(session);
-            day_core::AnyPiece::new(media("fixture:view.mp4").autoplay(false))
+            day_core::AnyPiece::new(media("fixture:view.mp4").no_autoplay())
         });
         let session = slot.borrow_mut().take().unwrap();
         let snapshot = session.snapshot();

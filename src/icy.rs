@@ -24,14 +24,14 @@ pub use stub::Probe;
 #[cfg(target_arch = "wasm32")]
 mod stub {
     use crate::StreamMetadata;
-    use day_reactive::Signal;
+    use day_reactive::AnyBinding;
     use std::rc::Rc;
 
     /// The web has no way to read a cross-origin stream: this probe never starts.
     pub struct Probe;
 
     impl Probe {
-        pub fn new(_sink: Signal<Option<StreamMetadata>>) -> Rc<Probe> {
+        pub fn new(_sink: AnyBinding<Option<StreamMetadata>>) -> Rc<Probe> {
             Rc::new(Probe)
         }
         pub fn start(&self, _url: String) {}
@@ -48,7 +48,7 @@ mod native {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-    use day_reactive::Signal;
+    use day_reactive::AnyBinding;
 
     /// One player's probe: at most one worker at a time, restarted per source.
     pub struct Probe {
@@ -59,13 +59,13 @@ mod native {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
     thread_local! {
-        /// Where a worker's finding lands: the signal of the probe that started it, looked up on
-        /// the UI thread by id (a `Signal` never crosses a thread; an id does).
-        static SINKS: RefCell<HashMap<u64, Signal<Option<StreamMetadata>>>> = RefCell::new(HashMap::new());
+        /// Where a worker's finding lands: the binding of the probe that started it, looked up
+        /// on the UI thread by id (a binding never crosses a thread; an id does).
+        static SINKS: RefCell<HashMap<u64, AnyBinding<Option<StreamMetadata>>>> = RefCell::new(HashMap::new());
     }
 
     impl Probe {
-        pub fn new(sink: Signal<Option<StreamMetadata>>) -> Rc<Probe> {
+        pub fn new(sink: AnyBinding<Option<StreamMetadata>>) -> Rc<Probe> {
             let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
             SINKS.with(|s| s.borrow_mut().insert(id, sink));
             Rc::new(Probe {
