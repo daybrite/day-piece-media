@@ -23,8 +23,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, features: gtk }
-          - { os: ubuntu-latest, features: qt }
+          - { os: ubuntu-latest, features: gtk, packages: "libgtk-4-media-gstreamer gstreamer1.0-plugins-good gstreamer1.0-libav" }
+          - { os: ubuntu-latest, features: qt, packages: "qt6-multimedia-dev" }
           - { os: macos-15, features: appkit }
           - { os: windows-latest, features: winui }
           - { os: windows-latest, features: xaml }
@@ -34,12 +34,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install the toolkit and media libraries
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          case "${{ matrix.features }}" in
-            gtk) sudo apt-get install -y --no-install-recommends libgtk-4-dev libadwaita-1-dev libgtk-4-media-gstreamer gstreamer1.0-plugins-good gstreamer1.0-libav pkg-config ;;
-            qt) sudo apt-get install -y --no-install-recommends qt6-base-dev qt6-multimedia-dev pkg-config ;;
-          esac
+        # Day owns toolkit prerequisites, including SVG; this piece adds playback libraries.
+        uses: daybrite/actions/.github/actions/setup-day-deps@v1
+        with:
+          target: linux-${{ matrix.features }}
+          pack: false
+          extras: false
+          packages: ${{ matrix.packages }}
       - run: cargo fmt --all -- --check
         if: matrix.features == 'gtk'
       - run: cargo clippy --all-targets -- -D warnings

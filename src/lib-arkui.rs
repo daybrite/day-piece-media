@@ -7,8 +7,8 @@
 // video node), so this crate ships its ArkTS (platform/harmony/ets/Index.ets) that `day build`
 // stages into the app's hvigor project via `[package.metadata.day.ohos]`. day-arkui's generic piece
 // bridge builds it and returns its FrameNode as an ordinary handle (docs/extending.md); commands
-// cross as this piece's own (cmd, arg) strings, and playback state comes back through the shim's
-// `pieceEvent` as the Custom event kind; `num` is the piece's report code.
+// cross as this piece's own (cmd, arg) strings, and playback state comes back through day-arkui's
+// `pieceEvent` export as the Custom event kind; `num` is the piece's report code.
 // ---------------------------------------------------------------------------
 
 use super::*;

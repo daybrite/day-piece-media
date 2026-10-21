@@ -233,6 +233,14 @@ the next play or load.
 - Android uses framework players. ExoPlayer/Media3 and system transport controls are not included. Plain HTTP may require app-level cleartext configuration.
 - GTK requires a media backend and codecs. Homebrew GTK has none, so it displays a playback
   error. GtkVideo's transport overlay cannot be hidden.
+- A missing decoder is not an error to GTK's GStreamer backend: it prepares the stream without the
+  track it can't decode and plays on, so a video stayed black while its state read Playing. When
+  a video player's stream prepares with no video, the GTK arm asks GStreamer's discoverer (loaded
+  at run time from `libgstpbutils`, so building needs no GStreamer development packages) which
+  decoders the file lacks, and sets the stream's error to name them. GtkVideo then shows its error
+  icon with that message as the tooltip, and the state reports `PlaybackState::Error`. A file
+  with sound and no video keeps playing. On Debian and Ubuntu, `gstreamer1.0-libav` supplies the
+  usual H.264 and AAC decoders.
 - Qt builds a URL-label fallback when Qt Multimedia is absent. Its player has no transport
   controls; use the piece's triggers.
 - A linux-qt AppImage plays through Qt's FFmpeg backend. The AppImage bundles libgstreamer but
