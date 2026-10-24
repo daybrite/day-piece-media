@@ -16,17 +16,19 @@ build = "build.rs"
 # gtk-rs) without touching any core day crate. See docs/extending.md + docs/media.md.
 
 [features]
-appkit = ["dep:day-appkit", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation", "dep:objc2-core-media", "dep:objc2-av-kit", "dep:objc2-av-foundation", "dep:dispatch2"]
+appkit = ["dep:day-appkit", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation", "dep:objc2-core-media", "dep:objc2-av-kit", "dep:objc2-av-foundation", "dep:dispatch2", "dep:block2"]
 # GtkVideo is core GTK, so the gtk feature compiles everywhere, but actual playback needs gtk4
 # built with a gstreamer media backend (Debian/Fedora default). Homebrew's gtk4 ships none, so on
 # macos-gtk GtkVideo shows its own "no media backend" error UI (the webkitgtk caveat class again).
 # libloading: the missing-decoder diagnosis (src/lib-gtk.rs) loads GStreamer's discoverer at run
 # time, so a GTK app needs no GStreamer development packages to build.
-gtk = ["dep:day-gtk", "dep:gtk4", "dep:libloading"]
-qt = ["dep:day-qt"]                 # + build.rs compiles src/lib-qt-shim.cpp, linking Qt6MultimediaWidgets when present (else a URL-label fallback)
+# day-dbus: the MPRIS now-playing service (src/mpris.rs) on the Linux session bus, shared by the
+# GTK and Qt arms; off Linux the module is not compiled.
+gtk = ["dep:day-gtk", "dep:gtk4", "dep:libloading", "dep:day-dbus"]
+qt = ["dep:day-qt", "dep:day-dbus"]  # + build.rs compiles src/lib-qt-shim.cpp, linking Qt6MultimediaWidgets when present (else a URL-label fallback)
 # objc2-av-kit 0.3 binds AVPlayerView for macOS only, so UIKit hand-rolls AVPlayerViewController
 # via extern_class!/msg_send! (the WKWebView-on-iOS situation); see [package.metadata.day.ios].
-uikit = ["dep:day-uikit", "dep:objc2", "dep:objc2-ui-kit", "dep:objc2-foundation", "dep:objc2-core-media", "dep:objc2-av-foundation", "dep:dispatch2"]
+uikit = ["dep:day-uikit", "dep:objc2", "dep:objc2-ui-kit", "dep:objc2-foundation", "dep:objc2-core-media", "dep:objc2-av-foundation", "dep:dispatch2", "dep:block2"]
 mdc = ["dep:day-mdc", "dep:day-android-runtime"]        # + [package.metadata.day.android]
 # HarmonyOS: no native node kind to construct, so the piece ships its ArkTS
 # (platform/harmony/ets/Index.ets, an ArkUI `Video` component for pictures and an AVPlayer for
@@ -49,7 +51,7 @@ mock = []
 # into an app build (Tier A.2), so an app depends on this piece with a plain `{ workspace = true }`,
 # with no per-backend feature fan-out in its Cargo.toml.
 [package.metadata.day]
-compat = "0.5"
+compat = "0.6"
 
 [package.metadata.day.piece]
 backends = ["appkit", "gtk", "qt", "uikit", "mdc", "xaml", "winui", "arkui", "dom", "mock"]
@@ -67,6 +69,7 @@ log = { version = "0.4" }
 day-appkit = { git = "https://github.com/daybrite/day.git", optional = true }
 day-gtk = { git = "https://github.com/daybrite/day.git", optional = true }
 day-qt = { git = "https://github.com/daybrite/day.git", optional = true }
+day-dbus = { git = "https://github.com/daybrite/day.git", optional = true }
 day-uikit = { git = "https://github.com/daybrite/day.git", optional = true }
 day-mdc = { git = "https://github.com/daybrite/day.git", optional = true }
 day-android-runtime = { git = "https://github.com/daybrite/day.git", optional = true }
@@ -77,15 +80,20 @@ gtk4 = { version = "0.11", optional = true }
 libloading = { version = "0.8", optional = true }
 day-dom = { git = "https://github.com/daybrite/day.git", optional = true }
 objc2 = { version = "0.6", optional = true }
-objc2-app-kit = { version = "0.3", optional = true, features = ["NSView", "NSResponder"] }
-objc2-ui-kit = { version = "0.3", optional = true, features = ["UIView", "UIViewController", "UIResponder"] }
-objc2-foundation = { version = "0.3", optional = true, features = ["NSString", "NSURL", "NSNotification", "NSKeyValueObserving", "NSError", "NSDictionary", "NSArray", "NSEnumerator"] }
+# NSImage: the now-playing artwork (MPMediaItemArtwork takes an image, src/lib-appkit.rs).
+objc2-app-kit = { version = "0.3", optional = true, features = ["NSView", "NSResponder", "NSImage"] }
+objc2-ui-kit = { version = "0.3", optional = true, features = ["UIView", "UIViewController", "UIResponder", "UIImage"] }
+objc2-foundation = { version = "0.3", optional = true, features = ["NSString", "NSURL", "NSNotification", "NSKeyValueObserving", "NSError", "NSDictionary", "NSArray", "NSEnumerator", "NSValue", "NSGeometry"] }
 objc2-core-media = { version = "0.3", optional = true, features = ["CMTime"] }
 objc2-av-kit = { version = "0.3", optional = true, features = ["AVPlayerView", "objc2-app-kit", "objc2-av-foundation"] }
 # The timed-metadata output (docs/media.md): the stream's own "now playing", delivered by
 # AVFoundation on a dispatch queue, hence dispatch2 for the main queue.
 objc2-av-foundation = { version = "0.3", optional = true, features = ["AVPlayer", "AVPlayerItem", "AVTime", "objc2-core-media", "AVPlayerItemOutput", "AVPlayerItemTrack", "AVMetadataItem", "AVTimedMetadataGroup", "AVMetadataIdentifiers", "AVMetadataFormat", "dispatch2"] }
 dispatch2 = { version = "0.3", optional = true }
+# The remote command handlers and the artwork request handler of the system's now-playing
+# surface (MPRemoteCommandCenter / MPMediaItemArtwork) are ObjC blocks. MediaPlayer itself has
+# no objc2 binding here; both Apple arms declare the few classes and keys they use by hand.
+block2 = { version = "0.6", optional = true }
 # The side probe of a stream's in-band metadata where the native player keeps it to itself
 # (src/icy.rs): one short request with `Icy-MetaData: 1`, through the platform's HTTP stack.
 day-part-http = { git = "https://github.com/daybrite/day.git" }
@@ -131,7 +139,9 @@ permissions = ["ohos.permission.KEEP_BACKGROUND_RUNNING"]
 # AVFAudio carries AVAudioSession, which the UIKit arm puts in the `playback` category so sound
 # keeps going with the ring switch on and (with the app's `UIBackgroundModes` audio entry) in the
 # background; the audio session is per process, and a media player is what needs one.
-frameworks = ["AVKit", "AVFoundation", "CoreMedia", "AVFAudio"]
+# MediaPlayer carries MPNowPlayingInfoCenter and MPRemoteCommandCenter: the lock screen's
+# now-playing card and the transport commands that come back from it.
+frameworks = ["AVKit", "AVFoundation", "CoreMedia", "AVFAudio", "MediaPlayer"]
 
 # --- macOS backend contribution ---
 # The same frameworks for the same reason once the platform/macos/ Xcode host project drives
@@ -139,7 +149,7 @@ frameworks = ["AVKit", "AVFoundation", "CoreMedia", "AVFAudio"]
 # package declares them. The cargo-driven build keeps linking them itself; the duplicate
 # declaration is harmless there.
 [package.metadata.day.macos]
-frameworks = ["AVKit", "AVFoundation", "CoreMedia"]
+frameworks = ["AVKit", "AVFoundation", "CoreMedia", "MediaPlayer"]
 
 # --- AppImage launcher default (docs/extending.md) ---
 # linuxdeploy bundles libgstreamer but none of GStreamer's element plugins, and the bundled library

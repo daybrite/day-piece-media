@@ -7,7 +7,9 @@
 // Qt6MultimediaWidgets (which day-qt-sys does not); where that module is absent the shim degrades
 // to a URL label (see the shim's #else). QVideoWidget has no built-in chrome, so `.controls` is a
 // no-op on Qt; drive playback with the `.play()/.pause()` triggers. Playback state comes back
-// through one file-static C callback the shim calls from the player's own signals.
+// through one file-static C callback the shim calls from the player's own signals. What is on
+// goes to the desktop through MPRIS on the session bus (src/mpris.rs, Linux only), whose
+// commands come back as `REMOTE` reports.
 // ---------------------------------------------------------------------------
 
 use super::*;
@@ -67,7 +69,7 @@ fn make(_backend: &mut Qt, p: &MediaProps, id: NodeId) -> QtHandle {
     // carries its own node id), so register it once rather than per view.
     static STATE_CB: std::sync::Once = std::sync::Once::new();
     STATE_CB.call_once(|| unsafe { day_media_set_state_cb(on_state) });
-    QtHandle(unsafe {
+    let handle = QtHandle(unsafe {
         day_media_new(
             id.0,
             cstr(&p.url).as_ptr(),
@@ -77,8 +79,66 @@ fn make(_backend: &mut Qt, p: &MediaProps, id: NodeId) -> QtHandle {
             p.audio_only as c_int,
             p.volume.clamp(0.0, 1.0),
         )
-    })
+    });
+    nodes::remember(&handle, id);
+    handle
 }
+
+/// The node behind each shim handle: `update` gets only the handle, and the MPRIS service
+/// reports a client's commands to a node. Linux only, like the service.
+#[cfg(target_os = "linux")]
+mod nodes {
+    use super::*;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    thread_local! {
+        static NODES: RefCell<HashMap<usize, NodeId>> = RefCell::new(HashMap::new());
+    }
+
+    pub(super) fn remember(h: &QtHandle, id: NodeId) {
+        NODES.with(|n| n.borrow_mut().insert(h.0 as usize, id));
+    }
+
+    pub(super) fn forget(h: &QtHandle) {
+        NODES.with(|n| n.borrow_mut().remove(&(h.0 as usize)));
+    }
+
+    pub(super) fn of(h: &QtHandle) -> Option<NodeId> {
+        NODES.with(|n| n.borrow().get(&(h.0 as usize)).copied())
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+mod nodes {
+    use super::*;
+
+    pub(super) fn remember(_h: &QtHandle, _id: NodeId) {}
+    pub(super) fn forget(_h: &QtHandle) {}
+}
+
+/// Linux's now-playing surface is MPRIS (src/mpris.rs): the shell's media controls and
+/// `playerctl` read it, and their commands come back as `REMOTE` reports on this node. macOS
+/// has no session bus by default, so the macos-qt build publishes nothing.
+#[cfg(target_os = "linux")]
+fn now_playing(h: &QtHandle, info: Option<&NowPlayingInfo>) {
+    if let Some(id) = nodes::of(h) {
+        crate::mpris::install(|node, text| {
+            day_qt::emit(
+                node,
+                Event::Custom {
+                    tag: report::TAG,
+                    num: report::REMOTE as f64,
+                    text,
+                },
+            )
+        });
+        crate::mpris::publish(id, info.cloned());
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn now_playing(_h: &QtHandle, _info: Option<&NowPlayingInfo>) {}
 
 fn update(_backend: &mut Qt, h: &QtHandle, patch: &MediaPatch) {
     unsafe {
@@ -87,6 +147,7 @@ fn update(_backend: &mut Qt, h: &QtHandle, patch: &MediaPatch) {
             MediaPatch::Seek(value) => day_media_seek(h.0, *value),
             MediaPatch::Rate(value) => day_media_rate(h.0, *value),
             MediaPatch::Background(_) => {}
+            MediaPatch::NowPlaying(info) => now_playing(h, info.as_ref()),
             MediaPatch::Poll => day_media_poll(h.0),
             MediaPatch::Play => day_media_play(h.0),
             MediaPatch::Pause => day_media_pause(h.0),
@@ -104,6 +165,11 @@ fn measure(backend: &mut Qt, h: &QtHandle, proposal: Proposal) -> Size {
     day_pieces::fill_measure(backend, h, proposal)
 }
 
+/// Forget the handle's node; day-qt frees the widget itself.
+fn release(_backend: &mut Qt, h: &QtHandle) {
+    nodes::forget(h);
+}
+
 day_pieces::renderer!(day_qt::RENDERERS, Qt,
     kind: KIND, props: MediaProps, patch: MediaPatch,
-    make: make, update: update, measure: measure);
+    make: make, update: update, measure: measure, release: release);

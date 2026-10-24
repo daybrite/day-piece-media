@@ -172,8 +172,56 @@ from a user action. Format those presentation strings on the UI thread with your
 - Desktop playback remains bound to the app process. Browsers control tab suspension and audible
   autoplay; a service worker cannot keep this audio session alive after document closure.
 
-System transport controls, rich lock-screen metadata and media-library integration are separate
-extensions. The Android foreground notification currently provides a route back into the app.
+Media-library integration is a separate extension. The system's own transport controls are
+the next section.
+
+## The system's now-playing surface
+
+```rust
+use day_piece_media::{NowPlayingInfo, RemoteCommand};
+
+audio.now_playing(Some(NowPlayingInfo {
+    title: track.title.clone(),
+    artist: track.artist.clone(),
+    album: track.album.clone(),
+    artwork_path: Some(cover_path),   // a local image file
+    artwork_url: None,                // or a URL where the platform fetches one itself
+    duration: Some(track.duration),   // None for a live stream
+    position: 0.0,
+    rate: 1.0,
+    playing: true,
+    live: false,
+    has_next: queue.has_next(),
+    has_previous: queue.has_previous(),
+}));
+audio.on_remote(move |command| match command {
+    RemoteCommand::Toggle => player.toggle(),
+    RemoteCommand::Next => player.next(),
+    RemoteCommand::Seek(seconds) => player.seek(seconds),
+    other => player.handle(other),
+});
+```
+
+`now_playing` tells the platform what is on: the lock screen and the media-key overlay on the
+Apple platforms (`MPNowPlayingInfoCenter`), the media notification and `MediaSession` on
+Android, an `org.mpris.MediaPlayer2` service on the Linux session bus (GTK and Qt), the
+System Media Transport Controls on Windows, `navigator.mediaSession` in the browser, and the
+AVSession on HarmonyOS. The info is kept across loads: set it when the item changes, and again
+when the state or the position jumps (a seek, a pause); the system advances its own clock from
+`rate` while `playing`. `None` clears it. `duration: None` and `live: true` describe a stream,
+which hides the position and the seek controls where the platform has them.
+
+`on_remote` delivers the commands those surfaces send back: the media keys, the lock screen's
+buttons, a headset click, an MPRIS client such as `playerctl`, a car head unit. Nothing happens
+on its own: the app runs each `RemoteCommand` through its own queue and triggers, so its UI and
+the system agree. Next and Previous are offered only while `has_next`/`has_previous` say so;
+`Seek`, `SkipForward` (30 s) and `SkipBackward` (15 s) only while the item is not live. A piece
+mounted in a tree takes the same callback through `Media::on_remote`.
+
+On the wire the arms report a command as `report::REMOTE` with the command's text form
+(`RemoteCommand::to_report`: `play`, `pause`, `toggle`, `stop`, `next`, `previous`,
+`seek:<secs>`, `forward:<secs>`, `backward:<secs>`), and receive the info as
+`MediaPatch::NowPlaying` (JSON across the Java, ArkTS and browser bridges).
 
 ## Stream metadata
 
@@ -193,6 +241,45 @@ backend:
   `day-part-http` every 20 seconds while the source is loaded. This adds a short connection per
   interval. A server without `icy-metaint` stops the probe; stop and disposal cancel it.
 - The browser backend does not extract stream metadata, so the signal remains `None`.
+
+## Reading tags from files
+
+The `tags` module reads a file's metadata from its container headers, for a library scanner or a
+now-playing view of local files. It needs no player, no platform engine and no extra crate.
+
+```rust
+use day_piece_media::tags::{self, Format, Tags};
+
+let t: Tags = tags::read_file(std::path::Path::new("/music/track.flac"))?;
+println!("{} - {} ({:?}, {:.0} s)", t.artist.unwrap_or_default(), t.title.unwrap_or_default(),
+    t.format, t.duration_secs.unwrap_or(0.0));
+if let Some(picture) = t.picture {
+    // picture.mime is "image/jpeg" or "image/png"; picture.data holds the bytes as stored.
+}
+```
+
+`read_file` opens the path; `read_from` takes any `Read + Seek`; `read` takes a byte slice. The
+container is detected from its magic numbers, so the extension is only a hint:
+`tags::is_audio_extension("m4a")` and `tags::AUDIO_EXTENSIONS` list the ones worth scanning.
+`Tags` carries the title, artist, album, album artist, genre, year, track and disc numbers with
+their totals, comment, duration, bitrate, sample rate, channel count, one picture (the front
+cover where the file marks one) and the `Format`.
+
+| Format | Read from |
+|---|---|
+| MP3 | ID3v2.2, 2.3 and 2.4 (unsynchronisation, extended header, footer, the four text encodings), ID3v1 for fields v2 leaves empty; a Xing/Info or VBRI header, else the first frame's bitrate and the audio byte count, for the duration. |
+| MP4, M4A, M4B | `moov/mvhd` for the duration, `ilst` for the fields and cover, `stsd` and the AAC `esds` configuration for sample rate and channels. |
+| FLAC | STREAMINFO, VORBIS_COMMENT, PICTURE. An ID3v2 tag in front of the stream is read too. |
+| Ogg Vorbis, Opus | The identification and comment packets (assembled across pages), a `METADATA_BLOCK_PICTURE`, and the last page's granule position for the duration. |
+| WAV | `fmt `, `data` (duration), `LIST INFO` (INAM, IART, IPRD, IGNR, ICRD, ITRK, ICMT) and an `id3 ` chunk. |
+| AIFF, AIFC | `COMM`, an `ID3 ` chunk, and `NAME`, `AUTH`, `ANNO` as fallbacks. |
+
+The reader touches only the headers it names, never the audio, so a library of thousands of
+files scans in seconds. Bytes that match no container read as `Format::Unknown` with every field
+`None`; an `io::Error` means the file could not be opened or read. Malformed input is handled
+field by field: a truncated frame, an absurd size or a zero length ends that field and the rest is
+still returned. A picture over 32 MiB or a text field over 1 MiB is skipped. The module does not
+write tags, and it skips lyrics, ReplayGain, chapters and ratings.
 
 ## Source layout and integration
 
@@ -260,7 +347,9 @@ the next play or load.
 ## Testing
 
 `cargo test` checks state decoding, metadata parsing, and the piece's command wiring on the mock
-backend. The live ICY probe test is ignored by default because it requires a network station.
+backend. The tag reader's tests build one file of each container in code, cut each at every
+length and feed it noise; on macOS they also convert a generated WAV with `afconvert` and read the
+AAC result back. The live ICY probe test is ignored by default because it requires a network station.
 `node --test tests/browser.mjs` checks event mapping, volume, and listener cleanup.
 
 The [demo](../demo/README.md) bundles a generated clip and tone, exercises timing and transport,

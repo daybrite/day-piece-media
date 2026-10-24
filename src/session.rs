@@ -65,7 +65,10 @@ struct Inner {
     volume: Cell<f64>,
     rate: Cell<f64>,
     background: RefCell<Option<BackgroundAudio>>,
+    now_playing: RefCell<Option<NowPlayingInfo>>,
+    remote: RefCell<Option<RemoteHandler>>,
 }
+type RemoteHandler = Rc<dyn Fn(RemoteCommand)>;
 impl Drop for Inner {
     fn drop(&mut self) {
         self.node.get_mut().take();
@@ -94,6 +97,8 @@ impl AudioSession {
             volume: Cell::new(1.0),
             rate: Cell::new(1.0),
             background: RefCell::new(None),
+            now_playing: RefCell::new(None),
+            remote: RefCell::new(None),
         }))
     }
     /// Signal remains valid while at least one session handle is retained.
@@ -118,6 +123,7 @@ impl AudioSession {
             let metadata = Signal::new(None);
             let error = Signal::new(None);
             let rate = Signal::new(self.0.rate.get());
+            let weak = Rc::downgrade(&self.0);
             let piece = media(source)
                 .audio_only()
                 .volume(self.0.volume.get())
@@ -125,7 +131,15 @@ impl AudioSession {
                 .timeline(timeline)
                 .metadata(metadata)
                 .error(error)
-                .rate(rate);
+                .rate(rate)
+                .on_remote(move |cmd| {
+                    let handler = weak
+                        .upgrade()
+                        .and_then(|inner| inner.remote.borrow().clone());
+                    if let Some(f) = handler {
+                        f(cmd);
+                    }
+                });
             let piece = if autoplay { piece } else { piece.no_autoplay() };
             let node = piece.mount(|props| {
                 with_tree(|t| {
@@ -210,6 +224,9 @@ impl AudioSession {
         if let Some(background) = self.0.background.borrow().clone() {
             self.command(MediaPatch::Background(background));
         }
+        if let Some(info) = self.0.now_playing.borrow().clone() {
+            self.command(MediaPatch::NowPlaying(Some(info)));
+        }
         // Detached HTML audio is not inserted into the document, so autoplay attribute alone
         // does not start it in every browser. Keep the explicit play in the user-action turn.
         #[cfg(feature = "dom")]
@@ -236,6 +253,19 @@ impl AudioSession {
     pub fn background(&self, presentation: BackgroundAudio) {
         *self.0.background.borrow_mut() = Some(presentation.clone());
         self.command(MediaPatch::Background(presentation));
+    }
+    /// What the system's now-playing surfaces show for this session (the lock screen, the
+    /// media-key overlay, an MPRIS client): a title, artist, artwork, position and the
+    /// transport buttons to offer. `None` clears it. Kept across loads, so set it whenever
+    /// the item changes, and again when the state or position jumps; the system advances
+    /// the clock itself from `rate` while playing.
+    pub fn now_playing(&self, info: Option<NowPlayingInfo>) {
+        *self.0.now_playing.borrow_mut() = info.clone();
+        self.command(MediaPatch::NowPlaying(info));
+    }
+    /// Receive the system's transport commands aimed at this session's player.
+    pub fn on_remote(&self, f: impl Fn(RemoteCommand) + 'static) {
+        *self.0.remote.borrow_mut() = Some(Rc::new(f));
     }
     pub fn play(&self) {
         self.command(MediaPatch::Play);
@@ -329,6 +359,12 @@ mod android_observation {
                         }
                     }
                     report::COMMAND_ERROR => snapshot.error = Some(MediaError::command(&text)),
+                    report::REMOTE => {
+                        let handler = inner.remote.borrow().clone();
+                        if let (Some(f), Some(cmd)) = (handler, RemoteCommand::from_report(&text)) {
+                            f(cmd);
+                        }
+                    }
                     report::METADATA => {
                         snapshot.metadata = Some(StreamMetadata::from_report(&text))
                     }

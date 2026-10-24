@@ -9,10 +9,11 @@
 // empty Column of no size. `day build` stages this file into the app's hvigor project and
 // generates the aggregator that registers `dayPiece` with the shim.
 //
-// Commands arrive as the piece's own vocabulary ('load' | 'play' | 'pause' | 'stop' | 'volume').
-// Playback state goes back through `pieceEvent` with the piece's report codes as `num` (0 idle,
-// 1 loading, 2 playing, 3 paused, 4 ended, 5 error), which reaches the Rust front-end as an
-// `Event::Custom`, the same channel the Android renderer uses.
+// Commands arrive as the piece's own vocabulary ('load' | 'play' | 'pause' | 'stop' | 'volume' |
+// 'nowplaying' …). Playback state goes back through `pieceEvent` with the piece's report codes as
+// `num` (0 idle, 1 loading, 2 playing, 3 paused, 4 ended, 5 error; 9 a transport command from the
+// system), which reaches the Rust front-end as an `Event::Custom`, the same channel the Android
+// renderer uses.
 
 import { BuilderNode, FrameNode, UIContext } from '@kit.ArkUI';
 import { media } from '@kit.MediaKit';
@@ -30,6 +31,8 @@ const PLAYING: number = 2;
 const PAUSED: number = 3;
 const ENDED: number = 4;
 const ERROR: number = 5;
+// A transport command from the system, in RemoteCommand's wire form (lib.rs `report::REMOTE`).
+const REMOTE: number = 9;
 
 function report(id: number, code: number, text: string = ''): void {
   nativeEntry.pieceEvent(id, text, code);
@@ -122,13 +125,137 @@ function dayAudioBuilder(params: DayMediaParams) {
 
 const instances: Map<number, DayMediaInstance> = new Map();
 
-// One continuous task per ability, shared by opted-in audio sessions. Serialize async
-// start/stop so source replacement cannot leave an orphaned task or AVSession.
+// What the Rust side serializes for 'nowplaying' (lib.rs NowPlayingInfo): seconds throughout.
+class NowPlayingInfo {
+  title: string = '';
+  artist: string = '';
+  album: string = '';
+  artwork_path: string | null = null;
+  artwork_url: string | null = null;
+  duration: number | null = null;
+  position: number = 0;
+  rate: number = 1;
+  playing: boolean = false;
+  live: boolean = false;
+  has_next: boolean = false;
+  has_previous: boolean = false;
+}
+
+// One AVSession per ability ("day.media"), shared by the continuous background task and the
+// system's now-playing surface (docs/media.md): the controller card, the media keys and the
+// playback-control widgets read it, and their commands come back as REMOTE reports on the player
+// that published last. Every async step runs on one chain, so a source replacement, a background
+// toggle and a now-playing update cannot interleave and leave an orphaned task or session.
 let backgroundContext: common.UIAbilityContext | null = null;
 let systemSession: avSession.AVSession | null = null;
-let backgroundWork: Promise<void> = Promise.resolve();
+let sessionContext: common.UIAbilityContext | null = null;
+let sessionWork: Promise<void> = Promise.resolve();
+let nowPlayingOwner: DayMediaInstance | null = null;
+let nowPlayingInfo: NowPlayingInfo | null = null;
+let nowPlayingSerial: number = 0;
+
+function remote(text: string): void {
+  const owner: DayMediaInstance | null = nowPlayingOwner;
+  if (owner !== null && instances.get(owner.params.id) === owner) { report(owner.params.id, REMOTE, text); }
+}
+
+// The session for `context`, created on first use and re-created on a context change; the
+// transport callbacks that do not depend on what is playing are bound here, once.
+async function ensureSession(context: common.UIAbilityContext): Promise<avSession.AVSession> {
+  if (systemSession !== null && sessionContext === context) { return systemSession; }
+  await destroySession();
+  const session: avSession.AVSession = await avSession.createAVSession(context, 'day.media', 'audio');
+  session.on('play', () => { remote('play'); });
+  session.on('pause', () => { remote('pause'); });
+  session.on('stop', () => { remote('stop'); });
+  await session.activate();
+  systemSession = session;
+  sessionContext = context;
+  if (nowPlayingInfo !== null) { await applyNowPlaying(session, nowPlayingInfo); }
+  return session;
+}
+
+async function destroySession(): Promise<void> {
+  const old: avSession.AVSession | null = systemSession;
+  systemSession = null;
+  sessionContext = null;
+  if (old !== null) { await old.destroy(); }
+}
+
+// Metadata, state and the item-dependent controls: the system shows a button only for a
+// callback that is registered, so next/previous and the seeks are bound per publish.
+async function applyNowPlaying(session: avSession.AVSession, info: NowPlayingInfo): Promise<void> {
+  const metadata: avSession.AVMetadata = {
+    assetId: `${info.title}\u001F${info.artist}\u001F${info.album}`,
+    title: info.title,
+    artist: info.artist,
+    album: info.album
+  };
+  const image: string | null = info.artwork_url !== null && info.artwork_url !== undefined && info.artwork_url !== ''
+    ? info.artwork_url : info.artwork_path !== null && info.artwork_path !== undefined && info.artwork_path !== '' ? info.artwork_path : null;
+  if (image !== null) { metadata.mediaImage = image; }
+  if (info.duration !== null && info.duration !== undefined && info.duration > 0) { metadata.duration = Math.round(info.duration * 1000); }
+  await session.setAVMetadata(metadata);
+  const position: avSession.PlaybackPosition = {
+    elapsedTime: Math.round(Math.max(0, info.position) * 1000),
+    updateTime: Date.now()
+  };
+  const state: avSession.AVPlaybackState = {
+    state: info.playing ? avSession.PlaybackState.PLAYBACK_STATE_PLAY : avSession.PlaybackState.PLAYBACK_STATE_PAUSE,
+    speed: info.rate > 0 ? info.rate : 1,
+    position: position
+  };
+  await session.setAVPlaybackState(state);
+  session.off('playNext');
+  session.off('playPrevious');
+  session.off('seek');
+  session.off('fastForward');
+  session.off('rewind');
+  if (info.has_next) { session.on('playNext', () => { remote('next'); }); }
+  if (info.has_previous) { session.on('playPrevious', () => { remote('previous'); }); }
+  if (!info.live) {
+    session.on('seek', (time: number) => { remote(`seek:${time / 1000}`); });
+    session.on('fastForward', (time?: number) => { remote(`forward:${time !== undefined && time > 0 ? time : 30}`); });
+    session.on('rewind', (time?: number) => { remote(`backward:${time !== undefined && time > 0 ? time : 15}`); });
+  }
+}
+
+function setNowPlaying(live: DayMediaInstance, arg: string): void {
+  if (arg === '') {
+    if (nowPlayingOwner === null || nowPlayingOwner === live) { clearNowPlaying(); }
+    return;
+  }
+  let parsed: NowPlayingInfo | null = null;
+  try { parsed = JSON.parse(arg) as NowPlayingInfo; } catch (err) { parsed = null; }
+  if (parsed === null) { report(live.params.id, 8, 'nowplaying:invalid'); return; }
+  const info: NowPlayingInfo = parsed;
+  nowPlayingOwner = live;
+  nowPlayingInfo = info;
+  const serial: number = ++nowPlayingSerial;
+  sessionWork = sessionWork.then(async () => {
+    if (serial !== nowPlayingSerial) { return; }
+    const session: avSession.AVSession = await ensureSession(live.context);
+    if (serial !== nowPlayingSerial) { return; }
+    await applyNowPlaying(session, info);
+  }).catch((err: BusinessError) => { console.warn(`day-piece-media now playing: ${err.message}`); });
+}
+
+function clearNowPlaying(): void {
+  nowPlayingOwner = null;
+  nowPlayingInfo = null;
+  const serial: number = ++nowPlayingSerial;
+  sessionWork = sessionWork.then(async () => {
+    const session: avSession.AVSession | null = systemSession;
+    if (serial !== nowPlayingSerial || session === null) { return; }
+    const stopped: avSession.AVPlaybackState = { state: avSession.PlaybackState.PLAYBACK_STATE_STOP };
+    await session.setAVPlaybackState(stopped);
+  }).catch((err: BusinessError) => { console.warn(`day-piece-media now playing: ${err.message}`); });
+  // With nothing published, the session stays only for a background task.
+  refreshBackground();
+}
+
 function refreshBackground(): void {
-  backgroundWork = backgroundWork.then(async () => {
+  sessionWork = sessionWork.then(async () => {
     const candidates: DayMediaInstance[] = [];
     instances.forEach((live: DayMediaInstance) => {
       if (live.params.audioOnly && live.background && live.active) { candidates.push(live); }
@@ -140,12 +267,13 @@ function refreshBackground(): void {
       backgroundContext = null;
       await backgroundTaskManager.stopBackgroundRunning(old);
     }
-    if (systemSession !== null) { await systemSession.destroy(); systemSession = null; }
-    if (selected === undefined) { return; }
+    if (selected === undefined) {
+      if (nowPlayingOwner === null) { await destroySession(); }
+      return;
+    }
     try {
       const context: common.UIAbilityContext = selected.context;
-      systemSession = await avSession.createAVSession(context, 'day.media', 'audio');
-      await systemSession.activate();
+      await ensureSession(context);
       const agent = await wantAgent.getWantAgent({
         wants: [{ bundleName: context.abilityInfo.bundleName, abilityName: context.abilityInfo.name }],
         operationType: wantAgent.OperationType.START_ABILITY,
@@ -155,7 +283,7 @@ function refreshBackground(): void {
       await backgroundTaskManager.startBackgroundRunning(context, backgroundTaskManager.BackgroundMode.AUDIO_PLAYBACK, agent);
       backgroundContext = context;
     } catch (err) {
-      if (systemSession !== null) { await systemSession.destroy(); systemSession = null; }
+      await destroySession();
       report(selected.params.id, 8, 'background:failed');
     }
   }).catch((err: BusinessError) => { console.warn(`day-piece-media background: ${err.message}`); });
@@ -336,6 +464,7 @@ function update(id: number, cmd: string, arg: string): void {
     return;
   }
   if (cmd === 'background') { live.background = true; refreshBackground(); return; }
+  if (cmd === 'nowplaying') { setNowPlaying(live, arg); return; }
   if (cmd === 'poll') { poll(live); return; }
   if (cmd === 'seek') {
     const seconds: number = Number(arg);
@@ -428,6 +557,7 @@ function dispose(id: number): void {
   const live: DayMediaInstance | undefined = instances.get(id);
   if (live !== undefined) {
     instances.delete(id);
+    if (nowPlayingOwner === live) { clearNowPlaying(); }
     releaseAudio(live);
     live.node.dispose();
   }

@@ -10,6 +10,8 @@
 // collapsed element of no size. Playback state comes back through one file-static C callback the
 // shim calls from the player's PlaybackSession, on a worker thread; each report is posted to the
 // UI thread before it becomes an event (see `on_state`). Windows-only; built + verified in CI.
+// What is on goes to the System Media Transport Controls through the shim, whose button and
+// seek events come back as `REMOTE` reports on the same path.
 // ---------------------------------------------------------------------------
 
 use super::*;
@@ -41,6 +43,22 @@ unsafe extern "C" {
     fn day_media_xaml_poll(w: *mut c_void);
     fn day_media_xaml_set_volume(w: *mut c_void, volume: f64);
     fn day_media_xaml_is_audio_only(w: *mut c_void) -> c_int;
+    fn day_media_xaml_now_playing(
+        w: *mut c_void,
+        present: c_int,
+        title: *const c_char,
+        artist: *const c_char,
+        album: *const c_char,
+        artwork_path: *const c_char,
+        artwork_url: *const c_char,
+        duration: f64,
+        position: f64,
+        rate: f64,
+        playing: c_int,
+        live: c_int,
+        has_next: c_int,
+        has_previous: c_int,
+    );
 }
 
 /// One state report from the shim: the code is the piece's own, the text an error's message.
@@ -98,12 +116,46 @@ fn update(_backend: &mut Xaml, h: &WinHandle, patch: &MediaPatch) {
             MediaPatch::Seek(value) => day_media_xaml_seek(h.0, *value),
             MediaPatch::Rate(value) => day_media_xaml_rate(h.0, *value),
             MediaPatch::Background(_) => {}
+            MediaPatch::NowPlaying(info) => now_playing(h, info.as_ref()),
             MediaPatch::Poll => day_media_xaml_poll(h.0),
             MediaPatch::Play => day_media_xaml_play(h.0),
             MediaPatch::Pause => day_media_xaml_pause(h.0),
             MediaPatch::Stop => day_media_xaml_stop(h.0),
             MediaPatch::Volume(v) => day_media_xaml_set_volume(h.0, v.clamp(0.0, 1.0)),
         }
+    }
+}
+
+/// Windows' now-playing surface is the System Media Transport Controls (the media keys' overlay,
+/// the volume flyout's card), which the shim fills from the player's own controls. The fields
+/// cross as plain C arguments, the shim having no JSON reader; `-1` is no duration, `present`
+/// 0 clears the card.
+fn now_playing(h: &WinHandle, info: Option<&NowPlayingInfo>) {
+    let i = info.cloned().unwrap_or_default();
+    let (title, artist, album) = (cstr(&i.title), cstr(&i.artist), cstr(&i.album));
+    let artwork_path = cstr(i.artwork_path.as_deref().unwrap_or(""));
+    let artwork_url = cstr(i.artwork_url.as_deref().unwrap_or(""));
+    let duration = i
+        .duration
+        .filter(|d| d.is_finite() && *d > 0.0)
+        .unwrap_or(-1.0);
+    unsafe {
+        day_media_xaml_now_playing(
+            h.0,
+            info.is_some() as c_int,
+            title.as_ptr(),
+            artist.as_ptr(),
+            album.as_ptr(),
+            artwork_path.as_ptr(),
+            artwork_url.as_ptr(),
+            duration,
+            i.position,
+            i.rate,
+            i.playing as c_int,
+            i.live as c_int,
+            i.has_next as c_int,
+            i.has_previous as c_int,
+        );
     }
 }
 

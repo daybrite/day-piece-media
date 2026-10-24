@@ -44,6 +44,9 @@ mod session;
 pub use session::{AudioSession, BackgroundAudio, PlaybackSnapshot};
 mod timeline;
 pub use timeline::{MediaCapabilities, MediaError, MediaErrorKind, MediaTimeline, TimeRange};
+/// Audio file metadata (ID3, MP4 atoms, FLAC and Vorbis comments, RIFF and AIFF chunks), read
+/// from the headers alone; the scanner behind a music library.
+pub mod tags;
 
 pub const KIND: &str = "day.piece.media";
 
@@ -105,6 +108,87 @@ pub enum MediaPatch {
     Poll,
     /// Configure host background playback. Text is supplied already localized by the app.
     Background(BackgroundAudio),
+    /// What the system's own now-playing surface shows (the lock screen, the media keys'
+    /// overlay, MPRIS clients): `None` clears it.
+    NowPlaying(Option<NowPlayingInfo>),
+}
+
+/// What is on, as the system's now-playing surfaces show it (see [`AudioSession::now_playing`]).
+/// Positions are seconds; `duration` is `None` for a live stream.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct NowPlayingInfo {
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    /// A local image file for the artwork, where the app has one.
+    pub artwork_path: Option<String>,
+    /// Else a URL the arm may fetch itself (the web and HarmonyOS take a URL directly).
+    pub artwork_url: Option<String>,
+    pub duration: Option<f64>,
+    pub position: f64,
+    /// The playback rate while playing (`1.0` normally), so the system can advance the clock.
+    pub rate: f64,
+    pub playing: bool,
+    /// A live stream: no seeking, the position means nothing.
+    pub live: bool,
+    pub has_next: bool,
+    pub has_previous: bool,
+}
+
+/// A command from the system's transport controls: the media keys, the lock screen, a
+/// headset button, an MPRIS client. Delivered through [`AudioSession::on_remote`] or
+/// [`Media::on_remote`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RemoteCommand {
+    Play,
+    Pause,
+    Toggle,
+    Stop,
+    Next,
+    Previous,
+    /// To an absolute position in seconds.
+    Seek(f64),
+    /// Ahead by seconds (a podcast app's 30-second skip).
+    SkipForward(f64),
+    SkipBackward(f64),
+}
+
+impl RemoteCommand {
+    /// Parse a [`report::REMOTE`] payload: a verb, with `seek:<secs>`, `forward:<secs>` and
+    /// `backward:<secs>` carrying a number.
+    pub fn from_report(text: &str) -> Option<RemoteCommand> {
+        let text = text.trim();
+        let (verb, value) = text.split_once(':').unwrap_or((text, ""));
+        let secs = || value.trim().parse::<f64>().ok().filter(|v| v.is_finite());
+        Some(match verb {
+            "play" => RemoteCommand::Play,
+            "pause" => RemoteCommand::Pause,
+            "toggle" => RemoteCommand::Toggle,
+            "stop" => RemoteCommand::Stop,
+            "next" => RemoteCommand::Next,
+            "previous" => RemoteCommand::Previous,
+            "seek" => RemoteCommand::Seek(secs()?),
+            "forward" => RemoteCommand::SkipForward(secs().unwrap_or(30.0)),
+            "backward" => RemoteCommand::SkipBackward(secs().unwrap_or(15.0)),
+            _ => return None,
+        })
+    }
+
+    /// The wire form [`from_report`](Self::from_report) reads.
+    pub fn to_report(self) -> String {
+        match self {
+            RemoteCommand::Play => "play".into(),
+            RemoteCommand::Pause => "pause".into(),
+            RemoteCommand::Toggle => "toggle".into(),
+            RemoteCommand::Stop => "stop".into(),
+            RemoteCommand::Next => "next".into(),
+            RemoteCommand::Previous => "previous".into(),
+            RemoteCommand::Seek(s) => format!("seek:{s}"),
+            RemoteCommand::SkipForward(s) => format!("forward:{s}"),
+            RemoteCommand::SkipBackward(s) => format!("backward:{s}"),
+        }
+    }
 }
 
 /// What the native player is doing, as reported through [`Media::state`].
@@ -161,10 +245,13 @@ pub mod report {
     pub const ERROR: i32 = 5;
     /// Not a state: the stream said what it is playing. `text` is the raw in-band value,
     /// an ICY `StreamTitle` (`Artist - Title`) or the ID3/timed fields packed
-    /// `title\u{1f}artist\u{1f}album`, which [`StreamMetadata::from_report`] parses.
+    /// `title\u{1f}artist\u{1f}album`, which [`StreamMetadata::from_report`](crate::StreamMetadata::from_report) parses.
     pub const METADATA: i32 = 6;
     pub const TIMELINE: i32 = 7;
     pub const COMMAND_ERROR: i32 = 8;
+    /// Not a state: the system's transport controls asked for something. `text` is a
+    /// [`RemoteCommand`](crate::RemoteCommand) in its wire form.
+    pub const REMOTE: i32 = 9;
 }
 
 /// What the stream says it is playing, as the arm delivered it and as parsed for display.
@@ -250,6 +337,7 @@ pub struct Media {
     error: Option<AnyBinding<Option<MediaError>>>,
     seek: Option<(AnyBinding<f64>, Trigger)>,
     rate: Option<AnyBinding<f64>>,
+    remote: Option<std::rc::Rc<dyn Fn(RemoteCommand)>>,
 }
 
 /// `media(url)`: a native audio/video player for `url` (a string, `Signal<String>`, or closure;
@@ -278,6 +366,7 @@ pub fn media<M>(url: impl IntoText<M>) -> Media {
         error: None,
         seek: None,
         rate: None,
+        remote: None,
     }
 }
 
@@ -376,6 +465,13 @@ impl Media {
         self.metadata = Some(AnyBinding::new(metadata));
         self
     }
+    /// Receive the system's transport commands (media keys, lock screen, MPRIS, a headset)
+    /// aimed at this player. Nothing happens on its own: the app runs the command through
+    /// its own triggers, so its queue and its UI stay in agreement.
+    pub fn on_remote(mut self, f: impl Fn(RemoteCommand) + 'static) -> Self {
+        self.remote = Some(std::rc::Rc::new(f));
+        self
+    }
 }
 
 impl Media {
@@ -398,6 +494,7 @@ impl Media {
             error,
             seek,
             rate,
+            remote,
         } = self;
         let initial = MediaProps {
             url: url.initial(),
@@ -527,6 +624,12 @@ impl Media {
                     }
                     return;
                 }
+                if *num as i32 == report::REMOTE {
+                    if let (Some(f), Some(cmd)) = (&remote, RemoteCommand::from_report(text)) {
+                        f(cmd);
+                    }
+                    return;
+                }
                 if *num as i32 == report::COMMAND_ERROR {
                     if let Some(sink) = error {
                         sink.set(Some(MediaError::command(text)));
@@ -611,6 +714,9 @@ pub const ICY_PROBE_SECS: u32 = 20;
 
 #[path = "icy.rs"]
 mod icy;
+
+#[cfg(all(any(feature = "gtk", feature = "qt"), target_os = "linux"))]
+mod mpris;
 
 // GtkVideo is core GTK, so this compiles on every gtk host, but playback needs a gstreamer media
 // backend in the gtk4 build (Linux default; Homebrew gtk4 has none, so macos-gtk shows GtkVideo's
@@ -713,6 +819,25 @@ mod tests {
         assert_eq!(m.album, "Kind of Blue");
         assert_eq!(m.raw, "So What - Miles Davis - Kind of Blue");
         assert!(StreamMetadata::from_report("  ").is_empty());
+    }
+
+    #[test]
+    fn remote_commands_round_trip() {
+        for c in [
+            RemoteCommand::Play,
+            RemoteCommand::Toggle,
+            RemoteCommand::Seek(12.5),
+            RemoteCommand::SkipForward(30.0),
+            RemoteCommand::SkipBackward(15.0),
+        ] {
+            assert_eq!(RemoteCommand::from_report(&c.to_report()), Some(c));
+        }
+        assert_eq!(
+            RemoteCommand::from_report("forward"),
+            Some(RemoteCommand::SkipForward(30.0))
+        );
+        assert_eq!(RemoteCommand::from_report("seek:nan"), None);
+        assert_eq!(RemoteCommand::from_report("dance"), None);
     }
 
     #[test]

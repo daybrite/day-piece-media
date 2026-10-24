@@ -6,19 +6,20 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 const source = readFileSync(new URL('../src/browser.rs', import.meta.url), 'utf8');
 const arm = source.match(/js!\(r#"([\s\S]*?)"#\);/)[1];
-function setup() {
+function setup(globals = {}) {
     const element = new EventTarget();
     const reports = [];
     let release;
     element.pause = () => { element.paused = true; element.dispatchEvent(new Event('pause')); };
     element.load = () => { element.loaded = true; element.dispatchEvent(new Event('emptied')); };
     element.removeAttribute = name => { element.removed = name; };
-    const bridge = runInNewContext(`${arm}\n({attach_media, set_volume, stop_media, seek_media, rate_media, poll_media, play_media})`, {
+    const bridge = runInNewContext(`${arm}\n({attach_media, set_volume, stop_media, seek_media, rate_media, poll_media, play_media, now_playing_media})`, {
         dayHost: { dom: {
             element: () => element,
             emit: (...args) => reports.push(args),
             onRelease: (_id, cleanup) => { release = cleanup; },
         } },
+        ...globals,
     });
     bridge.attach_media(3, 0.5, false);
     return { element, reports, bridge, release: () => release() };
@@ -103,4 +104,52 @@ test('rate is persistent across play and pause; rejected autoplay is observable'
     element.play = () => Promise.reject({name:'NotAllowedError'});
     bridge.play_media(3); await Promise.resolve();
     assert.deepEqual(reports.at(-1),[3,8,'play:NotAllowedError']);
+});
+
+function mediaSessionMock() {
+    const handlers = {};
+    const session = {
+        metadata: null, playbackState: 'none', position: null, handlers,
+        setActionHandler: (action, handler) => { handlers[action] = handler; },
+        setPositionState: state => { session.position = state ?? null; },
+    };
+    class MediaMetadata { constructor(init) { Object.assign(this, init); } }
+    return { session, globals: { navigator: { mediaSession: session }, MediaMetadata } };
+}
+test('now playing drives the Media Session API: metadata, position, and remote actions', () => {
+    const { session, globals } = mediaSessionMock();
+    const { reports, bridge } = setup(globals);
+    bridge.now_playing_media(3, JSON.stringify({title: 'Song', artist: 'Band', album: 'LP', artwork_url: 'https://x/a.jpg',
+        duration: 200, position: 12, rate: 1, playing: true, live: false, has_next: true, has_previous: false}));
+    assert.equal(session.metadata.title, 'Song');
+    assert.equal(session.metadata.artist, 'Band');
+    // Sandbox objects have the sandbox's prototypes, so compare their JSON.
+    assert.equal(JSON.stringify(session.metadata.artwork), JSON.stringify([{src: 'https://x/a.jpg'}]));
+    assert.equal(session.playbackState, 'playing');
+    assert.equal(JSON.stringify(session.position), JSON.stringify({duration: 200, playbackRate: 1, position: 12}));
+    assert.equal(session.handlers.previoustrack, null);
+    session.handlers.play(); session.handlers.nexttrack(); session.handlers.seekto({seekTime: 42.5}); session.handlers.seekforward({});
+    assert.deepEqual(reports.slice(-4), [[3, 9, 'play'], [3, 9, 'next'], [3, 9, 'seek:42.5'], [3, 9, 'forward:30']]);
+    bridge.now_playing_media(3, JSON.stringify({title: 'Radio', artist: '', album: '', artwork_url: null, duration: null,
+        position: 0, rate: 1, playing: false, live: true, has_next: false, has_previous: false}));
+    assert.equal(session.playbackState, 'paused');
+    assert.equal(JSON.stringify(session.metadata.artwork), '[]');
+    assert.equal(session.handlers.seekto, null);
+    assert.equal(session.handlers.nexttrack, null);
+    assert.equal(session.position, null);
+    bridge.now_playing_media(3, '');
+    assert.equal(session.metadata, null);
+    assert.equal(session.playbackState, 'none');
+    assert.equal(session.handlers.play, null);
+});
+test('releasing the element that published clears the surface; a browser without the API is left alone', () => {
+    const { session, globals } = mediaSessionMock();
+    const { bridge, release } = setup(globals);
+    bridge.now_playing_media(3, JSON.stringify({title: 'Song', playing: true}));
+    assert.equal(session.playbackState, 'playing');
+    release();
+    assert.equal(session.playbackState, 'none');
+    const bare = setup();
+    bare.bridge.now_playing_media(3, JSON.stringify({title: 'Song', playing: true}));
+    assert.equal(bare.reports.length, 0);
 });

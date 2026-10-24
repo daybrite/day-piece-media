@@ -80,6 +80,13 @@ fn update(backend: &mut Dom, h: &DomHandle, patch: &MediaPatch) {
         MediaPatch::Seek(value) => super::browser::seek(h.0 as i32, *value),
         MediaPatch::Rate(value) => super::browser::rate(h.0 as i32, *value),
         MediaPatch::Background(_) => {}
+        MediaPatch::NowPlaying(value) => {
+            let json = value
+                .as_ref()
+                .map(|v| serde_json::to_string(v).unwrap_or_default())
+                .unwrap_or_default();
+            super::browser::now_playing(h.0 as i32, &json);
+        }
         MediaPatch::Poll => super::browser::poll(h.0 as i32),
         MediaPatch::Play => super::browser::play(h.0 as i32),
         MediaPatch::Pause => backend.call(h, "pause"),

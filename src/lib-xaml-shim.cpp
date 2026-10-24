@@ -14,14 +14,23 @@
 // on a worker thread; the Rust side posts each report to the UI thread (src/lib-xaml.rs). A
 // sound-only player keeps the same element, collapsed, so one code path serves both shapes.
 //
+// What is on (day_media_xaml_now_playing) goes to the System Media Transport Controls: the media
+// keys' overlay and the volume flyout's card. The player's own controls are used, with its
+// CommandManager switched off so the buttons come to the app as code 9 (REMOTE, the piece's
+// RemoteCommand wire form: "play", "pause", "stop", "next", "previous", "seek:<secs>", …) over the
+// same state callback, and the app's transport decides.
+//
 // Written blind (no Windows host here); Windows-only, compiled by build.rs and linked alongside
 // day-xaml-sys. MediaPlayerElement is core system XAML so construction can't fail like EdgeHTML,
 // but creation still degrades to a URL TextBlock on any unexpected throw so the app keeps running.
 
 #include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Media.h>          // SystemMediaTransportControls
 #include <winrt/Windows.Media.Core.h>     // MediaSource
 #include <winrt/Windows.Media.Devices.h>  // Default audio endpoint diagnostics
 #include <winrt/Windows.Media.Playback.h> // MediaPlayer
+#include <winrt/Windows.Storage.h>        // StorageFile, for the artwork thumbnail
+#include <winrt/Windows.Storage.Streams.h>
 // One shim, two XAML stacks (docs/winui.md): windows-xaml builds it against system XAML,
 // windows-winui (DAY_WINUI) against WinUI 3. The namespaces differ; the controls do not.
 #ifdef DAY_WINUI
@@ -59,6 +68,9 @@ namespace WUX = DAY_XAML_NS;
 namespace WUXC = DAY_XAML_NS::Controls;
 namespace WMC = winrt::Windows::Media::Core;
 namespace WMP = winrt::Windows::Media::Playback;
+namespace WM = winrt::Windows::Media;
+namespace WS = winrt::Windows::Storage;
+namespace WSS = winrt::Windows::Storage::Streams;
 
 // The boxing functions, exported by day-xaml-sys (already linked into the app).
 extern "C" void *day_xaml_box(void *iinspectable_abi);
@@ -76,6 +88,8 @@ struct DayMediaInfo {
     uint64_t id = 0;
     bool audioOnly = false;
     StoppedFlag stopped;
+    // The transport controls' events are hooked on the first now-playing publish (wire_transport).
+    bool transportWired = false;
 };
 static std::map<void *, DayMediaInfo> g_info;
 
@@ -192,6 +206,39 @@ static void wire_state(const WMP::MediaPlayer &player, uint64_t id, const Stoppe
         if (!message.empty()) detail << ": " << message;
         report(id, 5, detail.str());
     });
+}
+
+// The System Media Transport Controls: the media keys' overlay and the volume flyout's card. A
+// MediaPlayer drives them itself through its CommandManager; that is switched off so the buttons
+// reach the app as REMOTE reports (code 9) and the app's own transport decides what a key does.
+// Both events arrive on a worker thread; `report` hands them to the Rust side, which posts them
+// to the UI thread like every other report.
+static void wire_transport(const WMP::MediaPlayer &player, uint64_t id) {
+    player.CommandManager().IsEnabled(false);
+    auto smtc = player.SystemMediaTransportControls();
+    smtc.ButtonPressed([id](const WM::SystemMediaTransportControls &,
+                            const WM::SystemMediaTransportControlsButtonPressedEventArgs &args) {
+        const char *command = nullptr;
+        switch (args.Button()) {
+        case WM::SystemMediaTransportControlsButton::Play: command = "play"; break;
+        case WM::SystemMediaTransportControlsButton::Pause: command = "pause"; break;
+        case WM::SystemMediaTransportControlsButton::Stop: command = "stop"; break;
+        case WM::SystemMediaTransportControlsButton::Next: command = "next"; break;
+        case WM::SystemMediaTransportControlsButton::Previous: command = "previous"; break;
+        case WM::SystemMediaTransportControlsButton::FastForward: command = "forward:30"; break;
+        case WM::SystemMediaTransportControlsButton::Rewind: command = "backward:15"; break;
+        default: return;
+        }
+        report(id, 9, command);
+    });
+    smtc.PlaybackPositionChangeRequested(
+        [id](const WM::SystemMediaTransportControls &,
+             const WM::PlaybackPositionChangeRequestedEventArgs &args) {
+            std::ostringstream text;
+            text.imbue(std::locale::classic());
+            text << "seek:" << args.RequestedPlaybackPosition().count() / 10000000.0;
+            report(id, 9, text.str());
+        });
 }
 
 // A command failure (seek/rate) for a handle; nothing for one already released.
@@ -360,6 +407,86 @@ void day_media_xaml_release(void *handle) {
 int day_media_xaml_is_audio_only(void *handle) {
     auto it = g_info.find(handle);
     return it != g_info.end() && it->second.audioOnly ? 1 : 0;
+}
+
+// What the system's now-playing card shows. `present` 0 clears it (and disables the controls);
+// otherwise the fields are the piece's NowPlayingInfo as plain arguments: `duration` < 0 is none,
+// `position`/`duration`/`rate` are seconds and a ratio, the ints are flags. The artwork is a
+// local path or a URL; a file opens asynchronously, so the card goes out without the picture
+// first and again once the file is open (blocking on the UI thread would hold the app).
+void day_media_xaml_now_playing(void *handle, int present, const char *title, const char *artist,
+                                const char *album, const char *artwork_path, const char *artwork_url,
+                                double duration, double position, double rate, int playing, int live,
+                                int has_next, int has_previous) {
+    auto it = g_info.find(handle);
+    if (it == g_info.end()) return;
+    try {
+        auto p = player_of(handle);
+        if (!p) return;
+        if (!it->second.transportWired) {
+            wire_transport(p, it->second.id);
+            it->second.transportWired = true;
+        }
+        auto smtc = p.SystemMediaTransportControls();
+        auto updater = smtc.DisplayUpdater();
+        if (!present) {
+            smtc.PlaybackStatus(WM::MediaPlaybackStatus::Stopped);
+            updater.ClearAll();
+            updater.Update();
+            smtc.IsEnabled(false);
+            return;
+        }
+        smtc.IsEnabled(true);
+        smtc.IsPlayEnabled(true);
+        smtc.IsPauseEnabled(true);
+        smtc.IsStopEnabled(true);
+        smtc.IsNextEnabled(has_next != 0);
+        smtc.IsPreviousEnabled(has_previous != 0);
+        smtc.IsFastForwardEnabled(live == 0);
+        smtc.IsRewindEnabled(live == 0);
+        smtc.PlaybackStatus(playing != 0 ? WM::MediaPlaybackStatus::Playing : WM::MediaPlaybackStatus::Paused);
+        if (std::isfinite(rate) && rate > 0) smtc.PlaybackRate(rate);
+
+        updater.Type(WM::MediaPlaybackType::Music);
+        auto music = updater.MusicProperties();
+        music.Title(hs(title));
+        music.Artist(hs(artist));
+        music.AlbumTitle(hs(album));
+        updater.Thumbnail(nullptr);
+        std::string path = artwork_path ? artwork_path : "";
+        std::string url = artwork_url ? artwork_url : "";
+        if (!path.empty()) {
+            WS::StorageFile::GetFileFromPathAsync(hs(path.c_str())).Completed(
+                [updater](const WF::IAsyncOperation<WS::StorageFile> &op, WF::AsyncStatus status) {
+                    if (status != WF::AsyncStatus::Completed) return;
+                    try {
+                        updater.Thumbnail(WSS::RandomAccessStreamReference::CreateFromFile(op.GetResults()));
+                        updater.Update();
+                    } catch (...) {
+                    }
+                });
+        } else if (!url.empty()) {
+            try {
+                updater.Thumbnail(WSS::RandomAccessStreamReference::CreateFromUri(WF::Uri{hs(url.c_str())}));
+            } catch (...) {
+            }
+        }
+        updater.Update();
+
+        if (live == 0 && std::isfinite(duration) && duration > 0) {
+            WM::SystemMediaTransportControlsTimelineProperties timeline;
+            timeline.StartTime(WF::TimeSpan{0});
+            timeline.MinSeekTime(WF::TimeSpan{0});
+            auto end = WF::TimeSpan{static_cast<int64_t>(duration * 10000000)};
+            timeline.EndTime(end);
+            timeline.MaxSeekTime(end);
+            double at = std::isfinite(position) ? (std::max)(0.0, (std::min)(position, duration)) : 0.0;
+            timeline.Position(WF::TimeSpan{static_cast<int64_t>(at * 10000000)});
+            smtc.UpdateTimelineProperties(timeline);
+        }
+    } catch (...) {
+        report_command_error(handle, "now_playing:failed");
+    }
 }
 
 } // extern "C"

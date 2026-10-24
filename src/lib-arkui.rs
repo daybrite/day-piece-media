@@ -48,6 +48,7 @@ fn make(_backend: &mut ArkUi, p: &MediaProps, id: NodeId) -> AHandle {
 
 fn update(_backend: &mut ArkUi, h: &AHandle, patch: &MediaPatch) {
     let volume;
+    let now_playing;
     let (cmd, arg) = match patch {
         MediaPatch::Load(u) => ("load", u.as_str()),
         MediaPatch::Seek(v) => {
@@ -59,6 +60,13 @@ fn update(_backend: &mut ArkUi, h: &AHandle, patch: &MediaPatch) {
             ("rate", volume.as_str())
         }
         MediaPatch::Background(_) => ("background", ""),
+        MediaPatch::NowPlaying(value) => {
+            now_playing = value
+                .as_ref()
+                .map(|v| serde_json::to_string(v).unwrap_or_default())
+                .unwrap_or_default();
+            ("nowplaying", now_playing.as_str())
+        }
         MediaPatch::Poll => ("poll", ""),
         MediaPatch::Play => ("play", ""),
         MediaPatch::Pause => ("pause", ""),

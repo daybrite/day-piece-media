@@ -17,6 +17,9 @@
 // A sound-only player needs no Video widget at all: GtkMediaStream plays on its own, so the leaf
 // is an empty, invisible GtkBox of no size that carries the stream as widget data. Playback state
 // comes from the stream's own notify signals (`playing`, `error`, `prepared`, `ended`).
+//
+// What is on goes to the desktop through MPRIS on the session bus (src/mpris.rs, Linux only),
+// whose commands come back as `REMOTE` reports.
 // ---------------------------------------------------------------------------
 
 use super::*;
@@ -180,6 +183,7 @@ fn make(_backend: &mut Gtk, p: &MediaProps, id: NodeId) -> gtk4::Widget {
 fn update(_backend: &mut Gtk, h: &gtk4::Widget, patch: &MediaPatch) {
     match patch {
         MediaPatch::Background(_) => {}
+        MediaPatch::NowPlaying(info) => now_playing(h, info.as_ref()),
         MediaPatch::Poll => {
             if let Some(id) = node_of(h) {
                 let mut value = MediaTimeline::default();
@@ -278,6 +282,20 @@ fn update(_backend: &mut Gtk, h: &gtk4::Widget, patch: &MediaPatch) {
         }
     }
 }
+
+/// Linux's now-playing surface is MPRIS (src/mpris.rs): the shell's media controls and
+/// `playerctl` read it, and their commands come back as `REMOTE` reports on this node. macOS
+/// has no session bus by default, so the macos-gtk build publishes nothing.
+#[cfg(target_os = "linux")]
+fn now_playing(h: &gtk4::Widget, info: Option<&NowPlayingInfo>) {
+    if let Some(id) = node_of(h) {
+        crate::mpris::install(|node, text| report(node, report::REMOTE, text));
+        crate::mpris::publish(id, info.cloned());
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn now_playing(_h: &gtk4::Widget, _info: Option<&NowPlayingInfo>) {}
 
 /// A sound-only leaf takes no room; a video fills what it is offered.
 fn measure(backend: &mut Gtk, h: &gtk4::Widget, proposal: Proposal) -> Size {

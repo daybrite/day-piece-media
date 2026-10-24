@@ -56,6 +56,7 @@ fn update(_backend: &mut Android, h: &AHandle, patch: &MediaPatch) {
 fn command(h: &AHandle, patch: &MediaPatch) {
     // Commands cross as (code, url, value): 0=load, 1=play, 2=pause, 3=stop, 4=volume.
     let background;
+    let now_playing;
     let (code, url, value) = match patch {
         MediaPatch::Load(u) => (0, u.as_str(), 0.0),
         MediaPatch::Seek(v) => (5, "", *v),
@@ -63,6 +64,13 @@ fn command(h: &AHandle, patch: &MediaPatch) {
         MediaPatch::Background(value) => {
             background = serde_json::to_string(value).unwrap_or_default();
             (8, background.as_str(), 0.0)
+        }
+        MediaPatch::NowPlaying(value) => {
+            now_playing = value
+                .as_ref()
+                .map(|v| serde_json::to_string(v).unwrap_or_default())
+                .unwrap_or_default();
+            (9, now_playing.as_str(), 0.0)
         }
         MediaPatch::Poll => (7, "", 0.0),
         MediaPatch::Play => (1, "", 0.0),

@@ -12,8 +12,10 @@ source, transport controls, and presentation.
 Use it for a video player, a sound-only stream, or internet radio. It supports play, pause,
 stop, reload, looping, reactive volume, seeking, playback speed, native timeline/capability
 observations, structured errors, and stream metadata. `AudioSession` owns a sound-only player
-independently of pages and windows. Available formats and network protocols depend on the
-platform engine; GTK does not expose playback speed.
+independently of pages and windows, publishes what is on to the system's now-playing surface
+(lock screen, media keys, MPRIS, the media notification) and takes its transport commands. Available formats and network protocols depend on the
+platform engine; GTK does not expose playback speed. The `tags` module reads a local file's
+metadata (ID3, MP4, FLAC, Ogg Vorbis, Opus, WAV, AIFF) from its headers, for library scans.
 
 ## Add it to a Day app
 

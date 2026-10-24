@@ -13,13 +13,20 @@ package dev.daybrite.day.piece.media;
 import android.media.AudioAttributes;
 import android.media.AudioManager;
 import android.media.AudioFocusRequest;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.BroadcastReceiver;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.PowerManager;
+import android.media.MediaMetadata;
 import android.media.MediaPlayer;
 import android.media.PlaybackParams;
+import android.media.session.MediaSession;
+import android.media.session.PlaybackState;
+import android.util.LruCache;
 import org.json.JSONObject;
 import org.json.JSONArray;
 import android.net.Uri;
@@ -29,7 +36,12 @@ import android.view.View;
 import android.widget.MediaController;
 import android.widget.VideoView;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.lang.ref.WeakReference;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.concurrent.ExecutorService;
@@ -47,6 +59,8 @@ public final class DayMedia {
 
     private static final int K_CUSTOM = 12;
     private static final int IDLE = 0, LOADING = 1, PLAYING = 2, PAUSED = 3, ENDED = 4, ERROR = 5;
+    /** A transport command from the system, in RemoteCommand's wire form (lib.rs `report::REMOTE`). */
+    private static final int REMOTE = 9;
 
     /** Everything a live player carries: the node it reports to and its MediaPlayer. */
     private static final class Live {
@@ -478,12 +492,186 @@ public final class DayMedia {
         return result;
     }
 
-    /** Imperative commands: 0=load (and play), 1=play, 2=pause, 3=stop, 4=volume (`value`). */
+    // --- The system's now-playing surface (docs/media.md): one framework MediaSession per
+    // process, named "day.media", owned by whichever player published last. The lock screen,
+    // the media keys and the MediaStyle notification (DayMediaService) all read it, and their
+    // transport commands come back as REMOTE reports on that owner: into a session player's
+    // report queue, or through nativeOnEvent for a view-backed one. The owner is held weakly
+    // so a released player is never pinned; its release clears the surface.
+    private static MediaSession session;
+    private static WeakReference<Live> nowPlayingOwner = new WeakReference<>(null);
+    private static JSONObject nowPlaying;
+    /** The artwork source the current info names (`file:<path>` or the URL), and its bitmap once
+     *  decoded; decoding and fetching happen on IO, keyed into a small cache. */
+    private static String artworkKey;
+    private static Bitmap artwork;
+    private static final LruCache<String, Bitmap> ARTWORK = new LruCache<>(4);
+    private static final int ARTWORK_SIDE = 512;
+    private static final int ARTWORK_BYTES = 16 << 20;
+
+    static MediaSession.Token sessionToken() { return session == null ? null : session.getSessionToken(); }
+    static JSONObject nowPlaying() { return nowPlaying; }
+    static Bitmap artwork() { return artwork; }
+    /** A string field, with JSON `null` (serde's `None`) read as empty rather than "null". */
+    static String text(JSONObject info, String name) { return info.isNull(name) ? "" : info.optString(name, ""); }
+
+    /** Deliver a transport command to the player that owns the now-playing surface. */
+    static void remote(String text) {
+        Live owner = nowPlayingOwner.get();
+        if (owner != null) owner.report(REMOTE, text);
+    }
+
+    @SuppressWarnings("deprecation")
+    private static MediaSession ensureSession() {
+        if (session != null) return session;
+        Context context = DayBridge.ctx.getApplicationContext();
+        MediaSession s = new MediaSession(context, "day.media");
+        // Implied from API 26 on; the flags are what routes media buttons here below it.
+        if (android.os.Build.VERSION.SDK_INT < 26) s.setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS | MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS);
+        // Media buttons (headset, KEYCODE_MEDIA_*) reach these through the callback's default
+        // onMediaButtonEvent, which picks onPlay/onPause for PLAY_PAUSE from the published state.
+        s.setCallback(new MediaSession.Callback() {
+            @Override public void onPlay() { remote("play"); }
+            @Override public void onPause() { remote("pause"); }
+            @Override public void onStop() { remote("stop"); }
+            @Override public void onSkipToNext() { remote("next"); }
+            @Override public void onSkipToPrevious() { remote("previous"); }
+            @Override public void onSeekTo(long pos) { remote("seek:" + Math.max(0L, pos) / 1000.0); }
+            @Override public void onFastForward() { remote("forward:30"); }
+            @Override public void onRewind() { remote("backward:15"); }
+        }, MAIN);
+        Intent launch = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
+        if (launch != null) s.setSessionActivity(PendingIntent.getActivity(context, 0, launch,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
+        session = s;
+        return s;
+    }
+
+    /** Command 9: `json` describes what is on (NowPlayingInfo), or is empty to clear. */
+    private static void setNowPlaying(Live live, String json) {
+        if (json == null || json.isEmpty()) {
+            Live owner = nowPlayingOwner.get();
+            if (owner == null || owner == live) clearNowPlaying();
+            return;
+        }
+        JSONObject info;
+        try { info = new JSONObject(json); } catch (Exception error) { live.report(8, "nowplaying:invalid"); return; }
+        nowPlayingOwner = new WeakReference<>(live);
+        nowPlaying = info;
+        applyNowPlaying(ensureSession(), info);
+    }
+
+    private static void applyNowPlaying(MediaSession s, JSONObject info) {
+        MediaMetadata.Builder metadata = new MediaMetadata.Builder()
+            .putString(MediaMetadata.METADATA_KEY_TITLE, text(info, "title"))
+            .putString(MediaMetadata.METADATA_KEY_ARTIST, text(info, "artist"))
+            .putString(MediaMetadata.METADATA_KEY_ALBUM, text(info, "album"));
+        double duration = info.optDouble("duration", Double.NaN);
+        if (!Double.isNaN(duration) && duration > 0) metadata.putLong(MediaMetadata.METADATA_KEY_DURATION, (long) (duration * 1000));
+        String path = text(info, "artwork_path");
+        String url = text(info, "artwork_url");
+        String key = !path.isEmpty() ? "file:" + path : !url.isEmpty() ? url : null;
+        if (key == null) { artworkKey = null; artwork = null; }
+        else if (!key.equals(artworkKey)) {
+            artworkKey = key;
+            artwork = ARTWORK.get(key);
+            if (artwork == null) loadArtwork(key, path, url);
+        }
+        if (artwork != null) metadata.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, artwork);
+        s.setMetadata(metadata.build());
+        boolean playing = info.optBoolean("playing");
+        long actions = PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE | PlaybackState.ACTION_PLAY_PAUSE | PlaybackState.ACTION_STOP;
+        if (info.optBoolean("has_next")) actions |= PlaybackState.ACTION_SKIP_TO_NEXT;
+        if (info.optBoolean("has_previous")) actions |= PlaybackState.ACTION_SKIP_TO_PREVIOUS;
+        if (!info.optBoolean("live")) actions |= PlaybackState.ACTION_SEEK_TO | PlaybackState.ACTION_FAST_FORWARD | PlaybackState.ACTION_REWIND;
+        double rate = info.optDouble("rate", 1.0);
+        long position = (long) (Math.max(0, info.optDouble("position", 0)) * 1000);
+        // Speed zero while paused: the system advances the shown position by the speed.
+        s.setPlaybackState(new PlaybackState.Builder()
+            .setState(playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED, position, playing && rate > 0 ? (float) rate : 0f)
+            .setActions(actions).build());
+        s.setActive(true);
+        DayMediaService.repost(DayBridge.ctx.getApplicationContext());
+    }
+
+    private static void clearNowPlaying() {
+        nowPlaying = null;
+        artworkKey = null;
+        artwork = null;
+        nowPlayingOwner = new WeakReference<>(null);
+        if (session != null) {
+            session.setPlaybackState(new PlaybackState.Builder().setState(PlaybackState.STATE_STOPPED, 0, 0f).build());
+            session.setMetadata(null);
+            // Inactive, so the media keys go to whichever app plays next.
+            session.setActive(false);
+        }
+        DayMediaService.repost(DayBridge.ctx.getApplicationContext());
+    }
+
+    /** Decode a local file or fetch a URL on IO, then re-apply the metadata if it is still wanted. */
+    private static void loadArtwork(final String key, final String path, final String url) {
+        IO.execute(() -> {
+            Bitmap bitmap = null;
+            try {
+                if (!path.isEmpty()) bitmap = decodeFile(path.startsWith("file://") ? Uri.parse(path).getPath() : path);
+                else bitmap = decodeBytes(fetch(url));
+            } catch (Exception | OutOfMemoryError ignored) {}
+            final Bitmap result = bitmap;
+            MAIN.post(() -> {
+                if (result == null || !key.equals(artworkKey)) return;
+                ARTWORK.put(key, result);
+                artwork = result;
+                if (session != null && nowPlaying != null) applyNowPlaying(session, nowPlaying);
+            });
+        });
+    }
+    private static byte[] fetch(String url) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        connection.setConnectTimeout(10_000);
+        connection.setReadTimeout(10_000);
+        connection.setInstanceFollowRedirects(true);
+        try {
+            if (connection.getResponseCode() / 100 != 2) throw new IOException("artwork: HTTP " + connection.getResponseCode());
+            InputStream in = connection.getInputStream();
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] chunk = new byte[16384];
+            int n;
+            while ((n = in.read(chunk)) > 0) {
+                if (out.size() + n > ARTWORK_BYTES) throw new IOException("artwork: too large");
+                out.write(chunk, 0, n);
+            }
+            return out.toByteArray();
+        } finally { connection.disconnect(); }
+    }
+    /** Two-pass decode: bounds first, then at a power-of-two sample that fits ARTWORK_SIDE. */
+    private static Bitmap decodeFile(String path) {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(path, bounds);
+        return BitmapFactory.decodeFile(path, sampled(bounds));
+    }
+    private static Bitmap decodeBytes(byte[] bytes) {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.length, sampled(bounds));
+    }
+    private static BitmapFactory.Options sampled(BitmapFactory.Options bounds) {
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        int side = Math.max(bounds.outWidth, bounds.outHeight);
+        options.inSampleSize = 1;
+        while (side / options.inSampleSize > ARTWORK_SIDE) options.inSampleSize *= 2;
+        return options;
+    }
+
+    /** Imperative commands: 0=load (and play), 1=play, 2=pause, 3=stop, 4=volume (`value`),
+     *  5=seek, 6=rate, 7=poll, 8=background (JSON in `url`), 9=now playing (JSON in `url`). */
     public static void mediaCommand(View view, int code, String url, double value) {
         Live live = LIVE.get(view);
         if (live == null) {
             return;
         }
+        if (code == 9) { setNowPlaying(live, url); return; }
         if (code == 8) {
             try { live.background = new JSONObject(url); updateBackgroundService(); }
             catch (Exception error) { live.report(8, "background:invalid"); }
@@ -597,6 +785,7 @@ public final class DayMedia {
         if (live == null) {
             return;
         }
+        if (nowPlayingOwner.get() == live) clearNowPlaying();
         live.active = false;
         live.abandonFocus();
         updateBackgroundService();

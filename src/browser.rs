@@ -12,6 +12,7 @@ day_bridge::bridge! {
         fn rate_media(id: i32, rate: f64);
         fn poll_media(id: i32);
         fn play_media(id: i32);
+        fn now_playing_media(id: i32, json: &str);
     }
     #[day_bridge::impl(js, platforms = [web])]
     js!(r#"
@@ -75,6 +76,52 @@ day_bridge::bridge! {
                 capabilities: {seek: seekable.length > 0, rate: true, volume: true}
             }));
         }
+        // The system's now-playing surface (docs/media.md) is the Media Session API where the
+        // browser has one: the metadata and position it shows, and the transport actions it
+        // offers, which come back as REMOTE (9) reports on the element that published last. An
+        // empty `json` clears both. A handler set to null withdraws that action's button.
+        let nowPlayingId = null;
+        function now_playing_media(id, json) {
+            if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+            const ms = navigator.mediaSession;
+            const actions = ['play', 'pause', 'stop', 'previoustrack', 'nexttrack', 'seekto', 'seekforward', 'seekbackward'];
+            // A browser throws for an action it does not know; that action is then simply absent.
+            const handle = (action, handler) => { try { ms.setActionHandler(action, handler); } catch (error) {} };
+            if (!json) {
+                if (nowPlayingId !== null && nowPlayingId !== id) return;
+                nowPlayingId = null;
+                ms.metadata = null;
+                ms.playbackState = 'none';
+                for (const action of actions) handle(action, null);
+                return;
+            }
+            const info = JSON.parse(json);
+            nowPlayingId = id;
+            ms.metadata = new MediaMetadata({
+                title: info.title || '', artist: info.artist || '', album: info.album || '',
+                artwork: info.artwork_url ? [{src: info.artwork_url}] : [],
+            });
+            ms.playbackState = info.playing ? 'playing' : 'paused';
+            if (typeof ms.setPositionState === 'function') {
+                try {
+                    if (!info.live && Number.isFinite(info.duration) && info.duration > 0) ms.setPositionState({
+                        duration: info.duration,
+                        playbackRate: info.rate > 0 ? info.rate : 1,
+                        position: Math.max(0, Math.min(info.duration, info.position || 0)),
+                    });
+                    else ms.setPositionState();
+                } catch (error) {}
+            }
+            const remote = text => dayHost.dom.emit(id, 9, text);
+            handle('play', () => remote('play'));
+            handle('pause', () => remote('pause'));
+            handle('stop', () => remote('stop'));
+            handle('previoustrack', info.has_previous ? () => remote('previous') : null);
+            handle('nexttrack', info.has_next ? () => remote('next') : null);
+            handle('seekto', info.live ? null : details => { if (Number.isFinite(details?.seekTime)) remote('seek:' + details.seekTime); });
+            handle('seekforward', info.live ? null : details => remote('forward:' + (details?.seekOffset > 0 ? details.seekOffset : 30)));
+            handle('seekbackward', info.live ? null : details => remote('backward:' + (details?.seekOffset > 0 ? details.seekOffset : 15)));
+        }
         function attach_media(id, volume, muted) {
             const el = dayHost.dom.element(id);
             el.dayMediaReleased = false;
@@ -102,6 +149,7 @@ day_bridge::bridge! {
                 el.dayMediaReleased = true;
                 for (const [name, handler] of handlers) el.removeEventListener(name, handler);
                 unload(el);
+                if (nowPlayingId === id) now_playing_media(id, '');
             });
         }
     "#);
@@ -119,6 +167,8 @@ day_bridge::bridge! {
     fn poll_media(id: i32) { let _ = id; }
     #[day_bridge::impl(rust, platforms = [other])]
     fn play_media(id: i32) { let _ = id; }
+    #[day_bridge::impl(rust, platforms = [other])]
+    fn now_playing_media(id: i32, json: &str) { let _ = (id, json); }
 }
 pub(crate) fn attach(id: i32, volume: f64, muted: bool) {
     attach_media(id, volume, muted);
@@ -141,4 +191,8 @@ pub(crate) fn poll(id: i32) {
 }
 pub(crate) fn play(id: i32) {
     play_media(id);
+}
+/// `json` is a serialized `NowPlayingInfo`, or empty to clear the surface.
+pub(crate) fn now_playing(id: i32, json: &str) {
+    now_playing_media(id, json);
 }

@@ -14,18 +14,23 @@
 // ---------------------------------------------------------------------------
 
 use super::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::ptr::null_mut;
+use std::ptr::{NonNull, null_mut};
 
+use block2::RcBlock;
 use day_appkit::AppKit;
+use day_spec::ffi_guard;
 use day_spec::{NodeId, Proposal, Size};
 use objc2::AnyThread;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2::runtime::{AnyObject, NSObjectProtocol};
-use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
-use objc2_app_kit::NSView;
+use objc2::runtime::{AnyObject, NSObjectProtocol, Sel};
+use objc2::{
+    ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, extern_class,
+    msg_send, sel,
+};
+use objc2_app_kit::{NSImage, NSView};
 use objc2_av_foundation::NSValueAVFoundationExtensions;
 use objc2_av_foundation::{
     AVMetadataCommonIdentifierAlbumName, AVMetadataCommonIdentifierArtist,
@@ -38,8 +43,8 @@ use objc2_av_foundation::{
 use objc2_av_kit::{AVPlayerView, AVPlayerViewControlsStyle};
 use objc2_core_media::{CMTime, kCMTimeZero};
 use objc2_foundation::{
-    NSArray, NSKeyValueObservingOptions, NSNotificationCenter, NSObject,
-    NSObjectNSKeyValueObserverRegistration, NSString, NSURL,
+    NSArray, NSDictionary, NSKeyValueObservingOptions, NSMutableDictionary, NSNotificationCenter,
+    NSNumber, NSObject, NSObjectNSKeyValueObserverRegistration, NSSize, NSString, NSURL,
 };
 
 /// The KVO key paths the observer registers for. `currentItem.status` reaches through to
@@ -353,6 +358,252 @@ fn state_of(player: &AVPlayer) -> (i32, String) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The system's now-playing surface (docs/media.md): MPNowPlayingInfoCenter carries what is on
+// (the Now Playing item of the menu bar and the Touch Bar), and MPRemoteCommandCenter brings back what the system's transport controls ask
+// (the media keys, a headset button, the lock screen), reported as `report::REMOTE` on the node
+// of the player that last published. No MediaPlayer binding is vendored here, so the four
+// classes are declared below and driven through `msg_send!`; the dictionary keys are the
+// framework's own exported constants.
+// ---------------------------------------------------------------------------
+
+#[link(name = "MediaPlayer", kind = "framework")]
+unsafe extern "C" {
+    static MPMediaItemPropertyTitle: &'static NSString;
+    static MPMediaItemPropertyArtist: &'static NSString;
+    static MPMediaItemPropertyAlbumTitle: &'static NSString;
+    static MPMediaItemPropertyPlaybackDuration: &'static NSString;
+    static MPMediaItemPropertyArtwork: &'static NSString;
+    static MPNowPlayingInfoPropertyElapsedPlaybackTime: &'static NSString;
+    static MPNowPlayingInfoPropertyPlaybackRate: &'static NSString;
+    static MPNowPlayingInfoPropertyIsLiveStream: &'static NSString;
+    static MPNowPlayingInfoPropertyMediaType: &'static NSString;
+}
+
+extern_class!(
+    #[unsafe(super(NSObject))]
+    struct MPNowPlayingInfoCenter;
+);
+
+extern_class!(
+    #[unsafe(super(NSObject))]
+    struct MPRemoteCommandCenter;
+);
+
+extern_class!(
+    #[unsafe(super(NSObject))]
+    struct MPRemoteCommand;
+);
+
+extern_class!(
+    #[unsafe(super(NSObject))]
+    struct MPMediaItemArtwork;
+);
+
+/// `MPRemoteCommandHandlerStatus`: the command was applied, or nothing is on to apply it to.
+const HANDLER_SUCCESS: isize = 0;
+const HANDLER_NO_ITEM: isize = 110;
+/// `MPNowPlayingInfoMediaTypeAudio`.
+const MEDIA_TYPE_AUDIO: isize = 1;
+/// `MPNowPlayingPlaybackState`: macOS routes the media keys by it (iOS derives it from the
+/// rate, and has no such property).
+const PLAYBACK_PLAYING: isize = 1;
+const PLAYBACK_PAUSED: isize = 2;
+const PLAYBACK_STOPPED: isize = 3;
+/// The skip commands' intervals, in seconds (a podcast app's 30 ahead, 15 back).
+const SKIP_FORWARD_SECS: f64 = 30.0;
+const SKIP_BACKWARD_SECS: f64 = 15.0;
+
+fn info_center() -> Retained<MPNowPlayingInfoCenter> {
+    // SAFETY: a MediaPlayer singleton, valid for the process's life.
+    unsafe { msg_send![MPNowPlayingInfoCenter::class(), defaultCenter] }
+}
+
+fn command_center() -> Retained<MPRemoteCommandCenter> {
+    // SAFETY: as `info_center`.
+    unsafe { msg_send![MPRemoteCommandCenter::class(), sharedCommandCenter] }
+}
+
+/// One of the command center's commands, by its property accessor (`sel!(playCommand)`).
+fn command(center: &MPRemoteCommandCenter, accessor: Sel) -> Retained<MPRemoteCommand> {
+    // SAFETY: every accessor passed is a MediaPlayer property returning an MPRemoteCommand.
+    unsafe { msg_send![center, performSelector: accessor] }
+}
+
+fn set_enabled(center: &MPRemoteCommandCenter, accessor: Sel, enabled: bool) {
+    let cmd = command(center, accessor);
+    // SAFETY: `enabled` is MPRemoteCommand's BOOL property.
+    unsafe {
+        let _: () = msg_send![&cmd, setEnabled: enabled];
+    }
+}
+
+/// Publish `info` on behalf of `node`'s player (which the system's transport commands then
+/// reach), or clear the surface when it is `None`.
+fn publish_now_playing(node: NodeId, info: Option<&NowPlayingInfo>) {
+    install_remote_commands();
+    let center = info_center();
+    let Some(info) = info else {
+        REMOTE_NODE.with(|n| {
+            if n.get() == Some(node) {
+                n.set(None);
+            }
+        });
+        // SAFETY: a nil dictionary is how the center is told nothing is on.
+        unsafe {
+            let _: () = msg_send![&center, setNowPlayingInfo: None::<&NSDictionary<NSString, AnyObject>>];
+            let _: () = msg_send![&center, setPlaybackState: PLAYBACK_STOPPED];
+        }
+        log::info!("day-piece-media: now playing cleared");
+        return;
+    };
+    REMOTE_NODE.with(|n| n.set(Some(node)));
+    let dict = NSMutableDictionary::<NSString, AnyObject>::new();
+    let rate = if info.playing { info.rate } else { 0.0 };
+    // SAFETY: the keys are MediaPlayer's exported constants, defined for the process's life.
+    unsafe {
+        dict.insert(MPMediaItemPropertyTitle, &NSString::from_str(&info.title));
+        dict.insert(MPMediaItemPropertyArtist, &NSString::from_str(&info.artist));
+        dict.insert(MPMediaItemPropertyAlbumTitle, &NSString::from_str(&info.album));
+        if let Some(duration) = info.duration {
+            dict.insert(MPMediaItemPropertyPlaybackDuration, &NSNumber::new_f64(duration));
+        }
+        dict.insert(MPNowPlayingInfoPropertyElapsedPlaybackTime, &NSNumber::new_f64(info.position));
+        dict.insert(MPNowPlayingInfoPropertyPlaybackRate, &NSNumber::new_f64(rate));
+        dict.insert(MPNowPlayingInfoPropertyIsLiveStream, &NSNumber::new_bool(info.live));
+        dict.insert(MPNowPlayingInfoPropertyMediaType, &NSNumber::new_isize(MEDIA_TYPE_AUDIO));
+        // `artwork_url` stays unused on Apple: the app passes a path when it has one.
+        if let Some(artwork) = info.artwork_path.as_deref().and_then(artwork_for) {
+            dict.insert(MPMediaItemPropertyArtwork, &artwork);
+        }
+        let dict: &NSDictionary<NSString, AnyObject> = &dict;
+        let _: () = msg_send![&center, setNowPlayingInfo: Some(dict)];
+        let state = if info.playing {
+            PLAYBACK_PLAYING
+        } else {
+            PLAYBACK_PAUSED
+        };
+        let _: () = msg_send![&center, setPlaybackState: state];
+    }
+    let commands = command_center();
+    set_enabled(&commands, sel!(nextTrackCommand), info.has_next);
+    set_enabled(&commands, sel!(previousTrackCommand), info.has_previous);
+    for accessor in [
+        sel!(changePlaybackPositionCommand),
+        sel!(skipForwardCommand),
+        sel!(skipBackwardCommand),
+    ] {
+        set_enabled(&commands, accessor, !info.live);
+    }
+    log::info!(
+        "day-piece-media: now playing {:?} by {:?} at {:.1}s ({})",
+        info.title,
+        info.artist,
+        info.position,
+        if info.playing { "playing" } else { "paused" }
+    );
+}
+
+/// Register the transport handlers once per process. Each one reports on the node of the
+/// player that last published now-playing info; with none, the system learns there is no item
+/// to act on.
+fn install_remote_commands() {
+    if REMOTE_READY.with(|r| r.replace(true)) {
+        return;
+    }
+    let center = command_center();
+    let fixed = |accessor: Sel, text: &'static str| {
+        add_handler(&command(&center, accessor), move |_event| text.to_string());
+    };
+    fixed(sel!(playCommand), "play");
+    fixed(sel!(pauseCommand), "pause");
+    fixed(sel!(togglePlayPauseCommand), "toggle");
+    fixed(sel!(stopCommand), "stop");
+    fixed(sel!(nextTrackCommand), "next");
+    fixed(sel!(previousTrackCommand), "previous");
+    add_handler(&command(&center, sel!(changePlaybackPositionCommand)), |event| {
+        // SAFETY: an MPChangePlaybackPositionCommandEvent, whose positionTime is a double.
+        let secs: f64 = unsafe { msg_send![event, positionTime] };
+        format!("seek:{secs}")
+    });
+    for (accessor, verb, default_secs) in [
+        (sel!(skipForwardCommand), "forward", SKIP_FORWARD_SECS),
+        (sel!(skipBackwardCommand), "backward", SKIP_BACKWARD_SECS),
+    ] {
+        let cmd = command(&center, accessor);
+        // SAFETY: `preferredIntervals` is MPSkipIntervalCommand's NSArray<NSNumber> property.
+        unsafe {
+            let intervals = NSArray::from_retained_slice(&[NSNumber::new_f64(default_secs)]);
+            let _: () = msg_send![&cmd, setPreferredIntervals: &*intervals];
+        }
+        add_handler(&cmd, move |event| {
+            // SAFETY: an MPSkipIntervalCommandEvent, whose interval is a double.
+            let secs: f64 = unsafe { msg_send![event, interval] };
+            let secs = if secs.is_finite() && secs > 0.0 {
+                secs
+            } else {
+                default_secs
+            };
+            format!("{verb}:{secs}")
+        });
+    }
+}
+
+/// Attach a handler to `command` that reports `text(event)` as a [`report::REMOTE`] event.
+fn add_handler(command: &MPRemoteCommand, text: impl Fn(&AnyObject) -> String + 'static) {
+    let handler = RcBlock::new(move |event: NonNull<AnyObject>| -> isize {
+        // The block runs inside a C ABI frame, so its body is contained like every other
+        // trampoline in this arm.
+        ffi_guard::contain(HANDLER_NO_ITEM, || {
+            let Some(node) = REMOTE_NODE.with(|n| n.get()) else {
+                return HANDLER_NO_ITEM;
+            };
+            // SAFETY: the command center hands a live event for the call's duration.
+            let text = text(unsafe { event.as_ref() });
+            log::info!("day-piece-media: remote command {text}");
+            day_appkit::emit(
+                node,
+                Event::Custom {
+                    tag: report::TAG,
+                    num: report::REMOTE as f64,
+                    text,
+                },
+            );
+            HANDLER_SUCCESS
+        })
+    });
+    // SAFETY: the command copies the block. The returned target token only serves to remove
+    // the handler again, which never happens: the handlers live as long as the process.
+    let _: *mut AnyObject = unsafe { msg_send![command, addTargetWithHandler: &*handler] };
+}
+
+/// The `MPMediaItemArtwork` for an image file, cached by path: every position update
+/// republishes the whole dictionary and must not reread the file.
+fn artwork_for(path: &str) -> Option<Retained<MPMediaItemArtwork>> {
+    let cached = ARTWORK.with(|a| {
+        a.borrow()
+            .as_ref()
+            .filter(|(cached_path, _)| cached_path == path)
+            .map(|(_, artwork)| artwork.clone())
+    });
+    if cached.is_some() {
+        return cached;
+    }
+    let image = NSImage::initWithContentsOfFile(NSImage::alloc(), &NSString::from_str(path))?;
+    let size = image.size();
+    let request = RcBlock::new(move |_wanted: NSSize| -> *mut NSImage {
+        // The one image serves every size asked for; the system scales it. Contained like
+        // the command handlers above.
+        ffi_guard::contain(null_mut(), || Retained::as_ptr(&image).cast_mut())
+    });
+    // SAFETY: the artwork copies the block, which owns the image it hands back at +0.
+    let artwork: Retained<MPMediaItemArtwork> = unsafe {
+        msg_send![MPMediaItemArtwork::alloc(), initWithBoundsSize: size, requestHandler: &*request]
+    };
+    ARTWORK.with(|a| *a.borrow_mut() = Some((path.to_string(), artwork.clone())));
+    Some(artwork)
+}
+
 /// What this arm keeps per realized view: the player (a sound-only view has no other route to
 /// it), its observer, and whether it measures zero.
 struct Live {
@@ -365,6 +616,13 @@ struct Live {
 
 day_core::tls_group! {
     static LIVE: RefCell<HashMap<usize, Live>> = RefCell::new(HashMap::new());
+    /// The node of the player that last published now-playing info: where the system's
+    /// transport commands go.
+    static REMOTE_NODE: Cell<Option<NodeId>> = Cell::new(None);
+    /// Whether the command center's handlers are in place (once per process).
+    static REMOTE_READY: Cell<bool> = Cell::new(false);
+    /// The last artwork, by path (see `artwork_for`).
+    static ARTWORK: RefCell<Option<(String, Retained<MPMediaItemArtwork>)>> = RefCell::new(None);
 }
 
 fn key_of(h: &NSView) -> usize {
@@ -440,15 +698,20 @@ fn make(backend: &mut AppKit, p: &MediaProps, id: NodeId) -> Retained<NSView> {
 }
 
 fn update(backend: &mut AppKit, h: &Retained<NSView>, patch: &MediaPatch) {
-    let Some((player, metadata)) = LIVE.with(|m| {
-        m.borrow()
-            .get(&key_of(h))
-            .map(|l| (l.player.clone(), l.metadata.clone()))
+    let Some((player, metadata, node)) = LIVE.with(|m| {
+        m.borrow().get(&key_of(h)).map(|l| {
+            (
+                l.player.clone(),
+                l.metadata.clone(),
+                l.observer.ivars().node,
+            )
+        })
     }) else {
         return;
     };
     match patch {
         MediaPatch::Background(_) => {}
+        MediaPatch::NowPlaying(info) => publish_now_playing(node, info.as_ref()),
         MediaPatch::Poll => {
             let timeline = timeline_of(&player);
             LIVE.with(|m| {
