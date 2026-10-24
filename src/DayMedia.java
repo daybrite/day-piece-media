@@ -176,14 +176,21 @@ public final class DayMedia {
     // Weak keys: a released view must not pin itself here.
     private static final Map<View, Live> LIVE = new WeakHashMap<>();
 
+    /** Whether a player keeps the process alive: an opted-in player that is playing, or the
+     *  one that owns the now-playing surface, so a paused song keeps its notification and can
+     *  be resumed from it. The surface clearing (a stop, an empty queue) ends that. */
+    private static boolean keepsService(Live live) {
+        if (!live.audioOnly || live.background == null) return false;
+        return live.active || (nowPlaying != null && nowPlayingOwner.get() == live);
+    }
     static boolean hasBackgroundPlayback() {
-        for (Live live : LIVE.values()) if (live.audioOnly && live.background != null && live.active) return true;
+        for (Live live : LIVE.values()) if (keepsService(live)) return true;
         return false;
     }
     private static void updateBackgroundService() {
         Context context = DayBridge.ctx.getApplicationContext();
         for (Live live : LIVE.values()) {
-            if (!live.audioOnly || live.background == null || !live.active) continue;
+            if (!keepsService(live)) continue;
             Intent intent = new Intent(context, DayMediaService.class)
                 .putExtra("title", live.background.optString("title"))
                 .putExtra("description", live.background.optString("description"))
@@ -556,9 +563,11 @@ public final class DayMedia {
         }
         JSONObject info;
         try { info = new JSONObject(json); } catch (Exception error) { live.report(8, "nowplaying:invalid"); return; }
+        boolean first = nowPlaying == null || nowPlayingOwner.get() != live;
         nowPlayingOwner = new WeakReference<>(live);
         nowPlaying = info;
         applyNowPlaying(ensureSession(), info);
+        if (first) updateBackgroundService();
     }
 
     private static void applyNowPlaying(MediaSession s, JSONObject info) {
@@ -606,6 +615,7 @@ public final class DayMedia {
             session.setActive(false);
         }
         DayMediaService.repost(DayBridge.ctx.getApplicationContext());
+        updateBackgroundService();
     }
 
     /** Decode a local file or fetch a URL on IO, then re-apply the metadata if it is still wanted. */

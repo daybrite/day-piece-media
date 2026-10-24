@@ -726,10 +726,18 @@ fn valid_rate(rate: f64) -> bool {
     rate.is_finite() && (0.25..=4.0).contains(&rate)
 }
 
+thread_local! {
+    // Set while a poll tick runs. A backend without a message loop (the mock toolkit under a
+    // test) runs a delayed post on the spot, so the tick that re-arms the poll would run the
+    // next tick inside itself without end; a nested tick returns instead, and polling stops
+    // where there is no loop to carry it.
+    static POLLING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 // Scope cancellation also protects against IDs reused after an entire host restart.
 fn poll_node(id: day_spec::NodeId, active: std::sync::Arc<std::sync::atomic::AtomicBool>) {
     day_reactive::on_main_delayed(250, move || {
-        if !active.load(std::sync::atomic::Ordering::Acquire) {
+        if !active.load(std::sync::atomic::Ordering::Acquire) || POLLING.replace(true) {
             return;
         }
         let alive = day_core::try_with_tree(|tree| {
@@ -744,6 +752,7 @@ fn poll_node(id: day_spec::NodeId, active: std::sync::Arc<std::sync::atomic::Ato
         if alive {
             poll_node(id, active);
         }
+        POLLING.set(false);
     });
 }
 

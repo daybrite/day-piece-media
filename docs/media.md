@@ -223,6 +223,25 @@ On the wire the arms report a command as `report::REMOTE` with the command's tex
 `seek:<secs>`, `forward:<secs>`, `backward:<secs>`), and receive the info as
 `MediaPatch::NowPlaying` (JSON across the Java, ArkTS and browser bridges).
 
+Where the platform shows more than a lock screen, the arms fill it in:
+
+- **Android** binds the published info to one `MediaSession` per process and shows it in the
+  background-playback notification as a media card with previous, play or pause, and next
+  buttons. A player that opted into background playback keeps that notification while it is
+  paused for as long as its info is published, so the person can resume from the shade; clearing
+  the info (a stop, the end of a queue) takes it down. Artwork is decoded from the path or
+  fetched from the URL off the main thread and cached.
+- **Linux** owns `org.mpris.MediaPlayer2.<name>` on the session bus, where `<name>` is the last
+  element of the app id (`tunes` for `dev.daybrite.tunes`), and publishes `Identity`,
+  `DesktopEntry`, the `xesam:` metadata, the position and the capabilities. Desktop shells, media
+  keys and clients such as `playerctl` drive the transport through it. The service starts on the
+  first publish; an app that never publishes owns no bus name.
+- **Windows** wires the `SystemMediaTransportControls` of the player's `MediaPlayer` on the first
+  publish, replacing the engine's own integration with the published metadata, artwork and
+  timeline. Before that, the engine's default controls stand.
+- **The browser** sets `MediaMetadata` and the position state and registers only the action
+  handlers the info allows, so the browser's own media overlay greys out what does not apply.
+
 ## Stream metadata
 
 ```rust
