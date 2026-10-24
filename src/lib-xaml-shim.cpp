@@ -1,7 +1,7 @@
 // Copyright © The Daybrite Project
 // SPDX-License-Identifier: MPL-2.0
 
-// The media piece's C++/WinRT shim, parallel to src/lib-qt-shim.cpp. day-xaml hosts the UWP
+// The media piece's C++/WinRT shim, parallel to src/lib-qt-shim.cpp. day-winui hosts the UWP
 // system XAML (DAY_XAML_NS, from the base Windows SDK, not WinAppSDK), so the matching
 // player is Windows.UI.Xaml.Controls.MediaPlayerElement backed by a Windows.Media.Playback
 // MediaPlayer. The element is boxed into a day handle via the `day_xaml_box`/`day_xaml_unbox`
@@ -331,7 +331,7 @@ void day_media_xaml_poll(void *handle) {
         } else { report(it->second.id, 5, "the media player could not be created"); }
     } catch (...) { report(it->second.id, 8, "poll:failed"); }
 }
-// Teardown, before day-xaml frees the element, in the order MediaPlayerElement documents for a
+// Teardown, before day-winui frees the element, in the order MediaPlayerElement documents for a
 // player the app set itself: pause, drop the source, detach the element (SetMediaPlayer(null)),
 // and only then close the player. Closing it while the element is still bound is what the
 // Showcase hit on the navigation away from its media page: an element that was in the visual

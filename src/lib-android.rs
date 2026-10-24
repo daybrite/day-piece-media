@@ -12,12 +12,12 @@
 // ---------------------------------------------------------------------------
 
 use super::*;
-use day_android::jni::objects::JString;
-use day_android::{AHandle, Android, java, java_string, with_env};
+use day_mdc::jni::objects::JString;
+use day_mdc::{AHandle, Android, java, java_string, with_env};
 use day_spec::{NodeId, Proposal, Size};
 
 // This piece's Java class (src/DayMedia.java, on the app classpath at build).
-day_android::java_class! {
+day_mdc::java_class! {
     DayMedia => dev.daybrite.day.piece.media.DayMedia,
     methods {
         static fn makeMedia(id: jlong, url: JString, autoplay: jboolean, looping: jboolean,
@@ -34,7 +34,7 @@ fn make(_backend: &mut Android, p: &MediaProps, id: NodeId) -> AHandle {
     make_player(p, id)
 }
 fn make_player(p: &MediaProps, id: NodeId) -> AHandle {
-    day_android::realize("media", |env| {
+    day_mdc::realize("media", |env| {
         let url = JString::from_str(env, &p.url)?;
         DayMedia::makeMedia(
             env,
@@ -93,7 +93,7 @@ fn release_player(h: &AHandle) {
     java(|env| DayMedia::releaseMedia(env, h.0.as_obj()));
 }
 
-day_pieces::renderer!(day_android::RENDERERS, Android,
+day_pieces::renderer!(day_mdc::RENDERERS, Android,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);
 

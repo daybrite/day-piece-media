@@ -125,7 +125,7 @@ Two Windows jobs failed after `fab629a8` landed, with different symptoms:
   dependencies that moved were `day` (a CLI/packaging commit plus the `remove_subtree`
   null-parent fix in day-core) and this crate (`3191fb3e` → `fab629a8`). The crash is the new
   xaml `release` hook: it closed the `MediaPlayer` while the `MediaPlayerElement` was still
-  bound to it, and day-xaml then freed the element. An element that was in the visual tree
+  bound to it, and day-winui then freed the element. An element that was in the visual tree
   keeps a presenter on the player, and finalizing it against a closed player fails fast inside
   XAML. The hook now follows the order MediaPlayerElement documents for an app-owned player:
   pause, drop the source, `SetMediaPlayer(null)`, then `Close()`. The demo did not crash on the

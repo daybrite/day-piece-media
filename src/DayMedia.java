@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
 // The day-piece-media crate's Android backend, bundled here and folded into the app's Gradle
-// build via [package.metadata.day.android], with no edits to day-android. It uses only
-// day-android's public Java surface: DayBridge.ctx (the Context) and DayBridge.nativeOnEvent (the
+// build via [package.metadata.day.android], with no edits to day-mdc. It uses only
+// day-mdc's public Java surface: DayBridge.ctx (the Context) and DayBridge.nativeOnEvent (the
 // event trampoline). android.widget.VideoView + MediaController and android.media.MediaPlayer are
 // framework classes, so the piece adds no Gradle dependencies; it declares the INTERNET permission
 // in Cargo.toml for network sources, which `day build` merges into the app manifest. See

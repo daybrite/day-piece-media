@@ -17,7 +17,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 
 use day_spec::{NodeId, Platform, Proposal, Size};
-use day_xaml::{WinHandle, Xaml};
+use day_winui::{WinHandle, Xaml};
 
 unsafe extern "C" {
     fn day_media_xaml_new(
@@ -46,7 +46,7 @@ unsafe extern "C" {
 /// One state report from the shim: the code is the piece's own, the text an error's message.
 ///
 /// MediaPlayer raises its events on a worker thread, and day takes events only on the UI thread:
-/// day-xaml's event sink is thread-local, so an emit made on the worker reached no sink and was
+/// day-winui's event sink is thread-local, so an emit made on the worker reached no sink and was
 /// dropped (the video played while the demo's state label still read "Idle"). Every report rides
 /// `Platform::post` home instead, which also queues the shim's own UI-thread reports (Stop's
 /// idle) behind the worker's, in the order they were made.
@@ -59,7 +59,7 @@ extern "C" fn on_state(id: u64, code: c_int, text: *const c_char) {
             .into_owned()
     };
     <Xaml as Platform>::post(Box::new(move || {
-        day_xaml::emit(
+        day_winui::emit(
             NodeId(id),
             Event::Custom {
                 tag: report::TAG,
@@ -115,7 +115,7 @@ fn measure(backend: &mut Xaml, h: &WinHandle, proposal: Proposal) -> Size {
     day_pieces::fill_measure(backend, h, proposal)
 }
 
-day_pieces::renderer!(day_xaml::RENDERERS, Xaml,
+day_pieces::renderer!(day_winui::RENDERERS, Xaml,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);
 
