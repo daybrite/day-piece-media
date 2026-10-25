@@ -27,7 +27,7 @@ name = "dayapp"
 crate-type = ["rlib"]
 
 [dependencies]
-day = { git = "https://github.com/daybrite/day.git" }
+day = { package = "day-app", git = "https://github.com/daybrite/day.git" }
 day-piece-media = { path = ".." }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
