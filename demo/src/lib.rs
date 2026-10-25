@@ -18,7 +18,7 @@ fn asset_url(asset: day::prelude::AssetName) -> String {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let directory = day_part_fs::data_dir().expect("app data directory");
+        let directory = day_part_filesystem::data_dir().expect("app data directory");
         std::fs::create_dir_all(&directory).expect("create demo data directory");
         let path = directory.join(asset.as_str());
         let bytes = resource(asset).expect("bundled synthetic media fixture");

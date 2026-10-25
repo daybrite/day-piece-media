@@ -27,12 +27,12 @@ pub struct PlaybackSnapshot {
     pub metadata: Option<StreamMetadata>,
     pub error: Option<MediaError>,
 }
-#[cfg(not(all(feature = "mdc", target_os = "android")))]
+#[cfg(not(all(feature = "material", target_os = "android")))]
 struct PlayerNode {
     node: RNode,
     scope: Scope,
 }
-#[cfg(not(all(feature = "mdc", target_os = "android")))]
+#[cfg(not(all(feature = "material", target_os = "android")))]
 impl Drop for PlayerNode {
     fn drop(&mut self) {
         day_core::try_with_tree(|t| {
@@ -44,13 +44,13 @@ impl Drop for PlayerNode {
         self.scope.dispose();
     }
 }
-#[cfg(all(feature = "mdc", target_os = "android"))]
+#[cfg(all(feature = "material", target_os = "android"))]
 struct PlayerNode {
     player: crate::android_impl::SessionPlayer,
     _probe: Rc<icy::Probe>,
     scope: Scope,
 }
-#[cfg(all(feature = "mdc", target_os = "android"))]
+#[cfg(all(feature = "material", target_os = "android"))]
 impl Drop for PlayerNode {
     fn drop(&mut self) {
         self.scope.dispose();
@@ -116,7 +116,7 @@ impl AudioSession {
         let generation = self.0.generation.get();
         let sink = self.0.snapshot;
         let scope = self.0.scope.create_child();
-        #[cfg(not(all(feature = "mdc", target_os = "android")))]
+        #[cfg(not(all(feature = "material", target_os = "android")))]
         let node = scope.enter(|| {
             let state = Signal::new(PlaybackState::Loading);
             let timeline = Signal::new(MediaTimeline::default());
@@ -178,11 +178,11 @@ impl AudioSession {
             );
             node
         });
-        #[cfg(not(all(feature = "mdc", target_os = "android")))]
+        #[cfg(not(all(feature = "material", target_os = "android")))]
         {
             *self.0.node.borrow_mut() = Some(PlayerNode { node, scope });
         }
-        #[cfg(all(feature = "mdc", target_os = "android"))]
+        #[cfg(all(feature = "material", target_os = "android"))]
         {
             let (player, probe) = scope.enter(|| {
                 let metadata = Signal::new(None);
@@ -236,14 +236,14 @@ impl AudioSession {
         Ok(generation)
     }
     fn command(&self, patch: MediaPatch) {
-        #[cfg(not(all(feature = "mdc", target_os = "android")))]
+        #[cfg(not(all(feature = "material", target_os = "android")))]
         {
             let node = self.0.node.borrow().as_ref().map(|n| n.node);
             if let Some(node) = node {
                 with_tree(|t| t.patch(node, Box::new(patch), false));
             }
         }
-        #[cfg(all(feature = "mdc", target_os = "android"))]
+        #[cfg(all(feature = "material", target_os = "android"))]
         if let Some(node) = self.0.node.borrow().as_ref() {
             node.player.command(&patch);
         }
@@ -319,7 +319,7 @@ impl AudioSession {
     }
 }
 
-#[cfg(all(feature = "mdc", target_os = "android"))]
+#[cfg(all(feature = "material", target_os = "android"))]
 mod android_observation {
     use super::*;
     use std::{collections::BTreeMap, rc::Weak};

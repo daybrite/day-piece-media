@@ -5,7 +5,7 @@
 // UIKit: AVPlayerViewController (AVKit) fronting an AVPlayer (AVFoundation): the same player as
 // AppKit, but objc2-av-kit 0.3 only generates the macOS (AVPlayerView) binding, so here we
 // hand-roll the view controller via `extern_class!` + `msg_send!` (exactly how the webview
-// hand-rolls WKWebView on iOS). Its `view` is the leaf UIView day-uikit manages; the controller
+// hand-rolls WKWebView on iOS). Its `view` is the leaf UIView day-toolkit-uikit manages; the controller
 // itself is retained in a thread_local (nothing else holds it once its view is embedded). A
 // sound-only player has no controller: the leaf is an empty, hidden UIView of no size.
 //
@@ -26,7 +26,7 @@ use std::ptr::{NonNull, null_mut};
 use block2::RcBlock;
 use day_spec::ffi_guard;
 use day_spec::{NodeId, Proposal, Size};
-use day_uikit::Uikit;
+use day_toolkit_uikit::Uikit;
 use objc2::AnyThread;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -246,7 +246,7 @@ impl MediaObserver {
     }
 
     fn report(&self, code: i32, text: String) {
-        day_uikit::emit(
+        day_toolkit_uikit::emit(
             self.ivars().node,
             Event::Custom {
                 tag: report::TAG,
@@ -287,7 +287,7 @@ define_class!(
         ) {
             log::debug!("day-piece-media: {} timed metadata group(s)", groups.len());
             if let Some(text) = metadata_text(groups) {
-                day_uikit::emit(
+                day_toolkit_uikit::emit(
                     self.ivars().node,
                     Event::Custom {
                         tag: report::TAG,
@@ -621,7 +621,7 @@ fn add_handler(command: &MPRemoteCommand, text: impl Fn(&AnyObject) -> String + 
             // SAFETY: the command center hands a live event for the call's duration.
             let text = text(unsafe { event.as_ref() });
             log::info!("day-piece-media: remote command {text}");
-            day_uikit::emit(
+            day_toolkit_uikit::emit(
                 node,
                 Event::Custom {
                     tag: report::TAG,
@@ -864,7 +864,7 @@ fn release(_backend: &mut Uikit, h: &Retained<UIView>) {
     drop(live.controller);
 }
 
-day_pieces::renderer!(day_uikit::RENDERERS, Uikit,
+day_pieces::renderer!(day_toolkit_uikit::RENDERERS, Uikit,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);
 

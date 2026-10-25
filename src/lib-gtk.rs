@@ -23,7 +23,7 @@
 // ---------------------------------------------------------------------------
 
 use super::*;
-use day_gtk::Gtk;
+use day_toolkit_gtk::Gtk;
 use day_spec::{NodeId, Proposal, Size};
 use gtk4::gio;
 use gtk4::glib;
@@ -47,7 +47,7 @@ fn media_file(source: &str) -> gtk4::MediaFile {
 }
 
 fn report(id: NodeId, code: i32, text: String) {
-    day_gtk::emit(
+    day_toolkit_gtk::emit(
         id,
         Event::Custom {
             tag: report::TAG,
@@ -567,6 +567,6 @@ mod diagnose {
 #[allow(unused_imports)]
 use glib::object::ObjectExt as _;
 
-day_pieces::renderer!(day_gtk::RENDERERS, Gtk,
+day_pieces::renderer!(day_toolkit_gtk::RENDERERS, Gtk,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);

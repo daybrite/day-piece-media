@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 // Qt: this crate's shim (src/lib-qt-shim.cpp) wrapping QMediaPlayer + QAudioOutput (+ a
 // QVideoWidget for pictures) behind a flat C ABI. build.rs compiles it and links
-// Qt6MultimediaWidgets (which day-qt-sys does not); where that module is absent the shim degrades
+// Qt6MultimediaWidgets (which day-toolkit-qt-sys does not); where that module is absent the shim degrades
 // to a URL label (see the shim's #else). QVideoWidget has no built-in chrome, so `.controls` is a
 // no-op on Qt; drive playback with the `.play()/.pause()` triggers. Playback state comes back
 // through one file-static C callback the shim calls from the player's own signals. What is on
@@ -16,7 +16,7 @@ use super::*;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 
-use day_qt::{Qt, QtHandle};
+use day_toolkit_qt::{Qt, QtHandle};
 use day_spec::{NodeId, Proposal, Size};
 
 unsafe extern "C" {
@@ -50,7 +50,7 @@ extern "C" fn on_state(id: u64, code: c_int, text: *const c_char) {
             .to_string_lossy()
             .into_owned()
     };
-    day_qt::emit(
+    day_toolkit_qt::emit(
         NodeId(id),
         Event::Custom {
             tag: report::TAG,
@@ -124,7 +124,7 @@ mod nodes {
 fn now_playing(h: &QtHandle, info: Option<&NowPlayingInfo>) {
     if let Some(id) = nodes::of(h) {
         crate::mpris::install(|node, text| {
-            day_qt::emit(
+            day_toolkit_qt::emit(
                 node,
                 Event::Custom {
                     tag: report::TAG,
@@ -165,11 +165,11 @@ fn measure(backend: &mut Qt, h: &QtHandle, proposal: Proposal) -> Size {
     day_pieces::fill_measure(backend, h, proposal)
 }
 
-/// Forget the handle's node; day-qt frees the widget itself.
+/// Forget the handle's node; day-toolkit-qt frees the widget itself.
 fn release(_backend: &mut Qt, h: &QtHandle) {
     nodes::forget(h);
 }
 
-day_pieces::renderer!(day_qt::RENDERERS, Qt,
+day_pieces::renderer!(day_toolkit_qt::RENDERERS, Qt,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);

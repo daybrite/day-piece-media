@@ -12,12 +12,12 @@
 // ---------------------------------------------------------------------------
 
 use super::*;
-use day_mdc::jni::objects::JString;
-use day_mdc::{AHandle, Android, java, java_string, with_env};
+use day_toolkit_material::jni::objects::JString;
+use day_toolkit_material::{AHandle, Material, java, java_string, with_env};
 use day_spec::{NodeId, Proposal, Size};
 
 // This piece's Java class (src/DayMedia.java, on the app classpath at build).
-day_mdc::java_class! {
+day_toolkit_material::java_class! {
     DayMedia => dev.daybrite.day.piece.media.DayMedia,
     methods {
         static fn makeMedia(id: jlong, url: JString, autoplay: jboolean, looping: jboolean,
@@ -30,11 +30,11 @@ day_mdc::java_class! {
     },
 }
 
-fn make(_backend: &mut Android, p: &MediaProps, id: NodeId) -> AHandle {
+fn make(_backend: &mut Material, p: &MediaProps, id: NodeId) -> AHandle {
     make_player(p, id)
 }
 fn make_player(p: &MediaProps, id: NodeId) -> AHandle {
-    day_mdc::realize("media", |env| {
+    day_toolkit_material::realize("media", |env| {
         let url = JString::from_str(env, &p.url)?;
         DayMedia::makeMedia(
             env,
@@ -50,7 +50,7 @@ fn make_player(p: &MediaProps, id: NodeId) -> AHandle {
     })
 }
 
-fn update(_backend: &mut Android, h: &AHandle, patch: &MediaPatch) {
+fn update(_backend: &mut Material, h: &AHandle, patch: &MediaPatch) {
     command(h, patch);
 }
 fn command(h: &AHandle, patch: &MediaPatch) {
@@ -85,7 +85,7 @@ fn command(h: &AHandle, patch: &MediaPatch) {
 }
 
 /// A sound-only player takes no room; a video fills what it is offered.
-fn measure(backend: &mut Android, h: &AHandle, proposal: Proposal) -> Size {
+fn measure(backend: &mut Material, h: &AHandle, proposal: Proposal) -> Size {
     let audio_only = java(|env| DayMedia::isAudioOnly(env, h.0.as_obj())).unwrap_or(false);
     if audio_only {
         return Size::ZERO;
@@ -94,14 +94,14 @@ fn measure(backend: &mut Android, h: &AHandle, proposal: Proposal) -> Size {
 }
 
 /// Release the MediaPlayer a sound-only view carries; a VideoView releases its own.
-fn release(_backend: &mut Android, h: &AHandle) {
+fn release(_backend: &mut Material, h: &AHandle) {
     release_player(h);
 }
 fn release_player(h: &AHandle) {
     java(|env| DayMedia::releaseMedia(env, h.0.as_obj()));
 }
 
-day_pieces::renderer!(day_mdc::RENDERERS, Android,
+day_pieces::renderer!(day_toolkit_material::RENDERERS, Material,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);
 

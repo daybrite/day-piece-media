@@ -188,7 +188,7 @@ int day_media_is_audio_only(void *w) { return static_cast<DayMedia *>(w)->audioO
 
 } // extern "C"
 
-#else // no Qt6MultimediaWidgets: degrade to a URL label (QtWidgets only, already linked by day-qt-sys)
+#else // no Qt6MultimediaWidgets: degrade to a URL label (QtWidgets only, already linked by day-toolkit-qt-sys)
 
 #include <QLabel>
 

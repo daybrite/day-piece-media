@@ -50,7 +50,7 @@ Use the same bare Day Git URL in your app and dependencies. This checkout requir
 |---|---|---|
 | macos-appkit | [AVPlayerView](https://developer.apple.com/documentation/avkit/avplayerview) and AVPlayer | System AVKit, AVFoundation, CoreMedia; Rust bindings through `objc2`. |
 | ios-uikit | [AVPlayerViewController](https://developer.apple.com/documentation/avkit/avplayerviewcontroller) | Also links AVFAudio for the playback audio session. Background playback needs app configuration. |
-| android-mdc | [VideoView](https://developer.android.com/reference/android/widget/VideoView), [MediaPlayer](https://developer.android.com/reference/android/media/MediaPlayer) | Framework APIs, not ExoPlayer. Network sources require INTERNET, contributed by this crate. |
+| android-material | [VideoView](https://developer.android.com/reference/android/widget/VideoView), [MediaPlayer](https://developer.android.com/reference/android/media/MediaPlayer) | Framework APIs, not ExoPlayer. Network sources require INTERNET, contributed by this crate. |
 | linux-gtk, macos-gtk, windows-gtk | [GtkVideo](https://docs.gtk.org/gtk4/class.Video.html), GtkMediaFile | Requires a GTK media backend and codecs. Homebrew GTK has no playback backend; the demo shows its error. |
 | linux-qt, macos-qt, windows-qt | [QMediaPlayer](https://doc.qt.io/qt-6/qmediaplayer.html), QVideoWidget | `Qt6MultimediaWidgets` through pkg-config. Without it, the crate builds a URL-label fallback. Qt provides no transport chrome here. |
 | windows-winui | [MediaPlayerElement](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.xaml.controls.mediaplayerelement) | Windows App SDK and MSVC; system media support determines codec availability. |
@@ -98,7 +98,7 @@ day patch --local ../../day --local ..
 day launch -t macos-appkit --script dayscript/walkthrough.yaml
 ```
 
-Use `-t macos-qt`, `-p macos-gtk`, `-p ios-uikit`, `-p android-mdc`, `-p web-dom`, or another
+Use `-t macos-qt`, `-p macos-gtk`, `-p ios-uikit`, `-p android-material`, `-p web-dom`, or another
 configured target. GTK without a playback backend still builds and launches; its walkthrough
 omits playback assertions on macOS and Windows. Native files are copied into the demo's app
 sandbox; the browser serves the same asset beside the application.

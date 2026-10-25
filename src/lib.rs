@@ -601,7 +601,7 @@ impl Media {
                 feature = "uikit",
                 feature = "gtk",
                 feature = "qt",
-                feature = "mdc",
+                feature = "material",
                 feature = "xaml",
                 feature = "arkui",
                 feature = "dom"
@@ -707,7 +707,7 @@ impl Piece for Media {
     }
 }
 
-day_pieces::glue_modules!(appkit, gtk, qt, uikit, mdc, xaml, arkui, dom);
+day_pieces::glue_modules!(appkit, gtk, qt, uikit, material, xaml, arkui, dom);
 
 /// How often the side probe re-reads a stream's in-band metadata, where it is used.
 pub const ICY_PROBE_SECS: u32 = 20;

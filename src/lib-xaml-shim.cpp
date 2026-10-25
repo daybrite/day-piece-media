@@ -1,11 +1,11 @@
 // Copyright © The Daybrite Project
 // SPDX-License-Identifier: MPL-2.0
 
-// The media piece's C++/WinRT shim, parallel to src/lib-qt-shim.cpp. day-winui hosts the UWP
+// The media piece's C++/WinRT shim, parallel to src/lib-qt-shim.cpp. day-toolkit-winui hosts the UWP
 // system XAML (DAY_XAML_NS, from the base Windows SDK, not WinAppSDK), so the matching
 // player is Windows.UI.Xaml.Controls.MediaPlayerElement backed by a Windows.Media.Playback
 // MediaPlayer. The element is boxed into a day handle via the `day_xaml_box`/`day_xaml_unbox`
-// functions day-xaml-sys exports (no edits to day's toolkit crates), exactly like the
+// functions day-toolkit-xaml-sys exports (no edits to day's toolkit crates), exactly like the
 // picker/webview shims.
 //
 // Playback state goes back through one file-static callback (day_media_xaml_set_state_cb), fed by
@@ -21,7 +21,7 @@
 // same state callback, and the app's transport decides.
 //
 // Written blind (no Windows host here); Windows-only, compiled by build.rs and linked alongside
-// day-xaml-sys. MediaPlayerElement is core system XAML so construction can't fail like EdgeHTML,
+// day-toolkit-xaml-sys. MediaPlayerElement is core system XAML so construction can't fail like EdgeHTML,
 // but creation still degrades to a URL TextBlock on any unexpected throw so the app keeps running.
 
 #include <winrt/Windows.Foundation.h>
@@ -72,7 +72,7 @@ namespace WM = winrt::Windows::Media;
 namespace WS = winrt::Windows::Storage;
 namespace WSS = winrt::Windows::Storage::Streams;
 
-// The boxing functions, exported by day-xaml-sys (already linked into the app).
+// The boxing functions, exported by day-toolkit-xaml-sys (already linked into the app).
 extern "C" void *day_xaml_box(void *iinspectable_abi);
 extern "C" void *day_xaml_unbox(void *handle);
 
@@ -378,7 +378,7 @@ void day_media_xaml_poll(void *handle) {
         } else { report(it->second.id, 5, "the media player could not be created"); }
     } catch (...) { report(it->second.id, 8, "poll:failed"); }
 }
-// Teardown, before day-winui frees the element, in the order MediaPlayerElement documents for a
+// Teardown, before day-toolkit-winui frees the element, in the order MediaPlayerElement documents for a
 // player the app set itself: pause, drop the source, detach the element (SetMediaPlayer(null)),
 // and only then close the player. Closing it while the element is still bound is what the
 // Showcase hit on the navigation away from its media page: an element that was in the visual

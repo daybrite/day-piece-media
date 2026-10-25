@@ -19,7 +19,7 @@
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, mpsc};
 use std::time::Instant;
 
-use day_dbus::{
+use day_platform_linux::dbus::{
     Connection, INTROSPECTABLE_INTERFACE, MethodCall, MethodError, NAME_FLAG_DO_NOT_QUEUE,
     NAME_REPLY_ALREADY_OWNER, NAME_REPLY_EXISTS, NAME_REPLY_PRIMARY_OWNER, PROPERTIES_INTERFACE,
     Value, introspection_xml,
@@ -674,7 +674,7 @@ mod tests {
         );
         assert_eq!(m.dict_get("mpris:length"), Some(&Value::I64(180_000_000)));
         let id = m.dict_get("mpris:trackid").and_then(Value::as_str).unwrap();
-        assert!(day_dbus::is_valid_object_path(id), "{id}");
+        assert!(day_platform_linux::dbus::is_valid_object_path(id), "{id}");
         assert_eq!(metadata(None).as_array().map(<[Value]>::len), Some(0));
     }
 

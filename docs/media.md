@@ -141,7 +141,7 @@ previous errors and observations.
 | Backend | Timeline and seek | Speed | Buffered ranges |
 |---|---|---|---|
 | AppKit / UIKit | AVPlayer time, duration and native seekable ranges | AVPlayer default/current rate | Native loaded ranges |
-| Android MDC | MediaPlayer time/duration; seek for finite sources | PlaybackParams on API 23+, preserving pause | Buffer-percentage estimate for finite sources |
+| Android Material Components | MediaPlayer time/duration; seek for finite sources | PlaybackParams on API 23+, preserving pause | Buffer-percentage estimate for finite sources |
 | GTK | GtkMediaStream timestamp/duration and seekability | Unsupported by GTK API; reports an error | Unavailable |
 | Qt | QMediaPlayer position/duration and seekability | QMediaPlayer playback rate | Unavailable |
 | Windows XAML / WinUI | MediaPlaybackSession position/duration and CanSeek | MediaPlaybackSession playback rate | Unavailable |

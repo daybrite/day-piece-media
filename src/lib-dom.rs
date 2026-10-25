@@ -27,7 +27,7 @@ use super::*;
 use std::cell::RefCell;
 use std::collections::HashSet;
 
-use day_dom::{Dom, DomHandle};
+use day_toolkit_dom::{Dom, DomHandle};
 use day_spec::{NodeId, Proposal, Size};
 
 day_core::tls_group! {
@@ -40,7 +40,7 @@ fn make(backend: &mut Dom, p: &MediaProps, _id: NodeId) -> DomHandle {
     if !p.url.is_empty() {
         backend.set_attr(&h, "src", &p.url);
     }
-    // A boolean attribute is set only when it is on. day-dom's `""`-removes convention covers
+    // A boolean attribute is set only when it is on. day-toolkit-dom's `""`-removes convention covers
     // `disabled` and `readonly` alone; for any other name `""` is a PRESENT attribute, and
     // `autoplay=""` means autoplay. Nothing here changes after creation (MediaPatch carries no
     // flag), so there is never anything to remove. `muted` is not an attribute at all: one set by
@@ -92,7 +92,7 @@ fn update(backend: &mut Dom, h: &DomHandle, patch: &MediaPatch) {
         MediaPatch::Pause => backend.call(h, "pause"),
         // Removing the source and re-loading is what makes the element let its connection go
         // (a paused live stream keeps buffering); the `emptied` event reports the Idle. It goes
-        // through the bridge because `src` must be REMOVED: day-dom's `set_attr` cannot remove
+        // through the bridge because `src` must be REMOVED: day-toolkit-dom's `set_attr` cannot remove
         // it, and an empty `src` is a format error, not an absence (browser.rs).
         MediaPatch::Stop => super::browser::stop(h.0 as i32),
         MediaPatch::Volume(v) => super::browser::volume(h.0 as i32, *v),
@@ -111,7 +111,7 @@ fn measure(_backend: &mut Dom, h: &DomHandle, p: Proposal) -> Size {
 
 // Defines `register()`, which `media()` calls: web-dom's registry is populated at runtime, unlike
 // the link-time `renderer!` the other eight arms use.
-day_pieces::dom_renderer!(day_dom::register_renderer, Dom,
+day_pieces::dom_renderer!(day_toolkit_dom::register_renderer, Dom,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);
 

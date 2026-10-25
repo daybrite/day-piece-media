@@ -3,8 +3,8 @@
 
 //! Compiles this piece's native shim per feature: a standalone Day Piece carrying native C++
 //! without touching Day's toolkit crates (like day-piece-webview). Qt uses `cc` + pkg-config and
-//! (unlike day-qt-sys) links Qt6MultimediaWidgets when the host ships it. XAML uses `cc` (MSVC) +
-//! the Windows SDK cppwinrt projection, mirroring day-xaml-sys / the webview's XAML shim.
+//! (unlike day-toolkit-qt-sys) links Qt6MultimediaWidgets when the host ships it. XAML uses `cc` (MSVC) +
+//! the Windows SDK cppwinrt projection, mirroring day-toolkit-xaml-sys / the webview's XAML shim.
 
 fn main() {
     day_build::bridge::generate().expect("media browser bridge");
@@ -26,7 +26,7 @@ fn main() {
 }
 
 fn build_xaml() {
-    // Same recipe as day-xaml-sys / the webview's XAML shim: the cppwinrt projection headers live
+    // Same recipe as day-toolkit-xaml-sys / the webview's XAML shim: the cppwinrt projection headers live
     // under the SDK's Include\<ver>\cppwinrt (not on the default `INCLUDE` path); C++20 + /bigobj +
     // /EHsc.
     let cppwinrt = day_toolchain::cppwinrt_include_for_build_script().expect(
@@ -50,12 +50,12 @@ fn build_xaml() {
     }
     build.compile("daymediaxamlshim");
     // WindowsApp.lib (WinRT umbrella) + the day_xaml_box/unbox functions are already linked by
-    // day-xaml-sys; nothing extra to link here.
+    // day-toolkit-xaml-sys; nothing extra to link here.
 }
 fn build_qt() {
     // QMediaPlayer/QVideoWidget live in Qt6Multimedia(Widgets), which not every Qt host ships.
     // When absent the shim degrades to a QtWidgets URL label (see lib-qt-shim.cpp's #else), so
-    // build against Qt6Widgets (which day-qt-sys already links) instead of failing the build.
+    // build against Qt6Widgets (which day-toolkit-qt-sys already links) instead of failing the build.
     let has_multimedia = pkg_config_exists("Qt6MultimediaWidgets");
     let cflags_pkg = if has_multimedia {
         "Qt6MultimediaWidgets" // --cflags pull in Qt6Core/Gui/Widgets/Multimedia too
@@ -78,8 +78,8 @@ fn build_qt() {
     build.flag_if_supported("-Wno-unused-parameter");
     build.compile("daymediaqtshim");
 
-    // day-qt-sys already links Qt6Core/Qt6Widgets, but not the Multimedia modules; emit those.
-    // Duplicates with day-qt-sys's flags are harmless (the linker dedups). The label fallback needs
+    // day-toolkit-qt-sys already links Qt6Core/Qt6Widgets, but not the Multimedia modules; emit those.
+    // Duplicates with day-toolkit-qt-sys's flags are harmless (the linker dedups). The label fallback needs
     // nothing beyond Qt6Widgets (already linked), so emit no extra libs there.
     if has_multimedia {
         let libs = pkg_config(&["--libs", "Qt6MultimediaWidgets"]);

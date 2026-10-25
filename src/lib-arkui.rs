@@ -5,9 +5,9 @@
 // HarmonyOS: the ArkTS `Video` component for pictures, an `AVPlayer` (@kit.MediaKit) for sound
 // only. Like the webview, there is no native node kind to construct (the ArkUI C node API has no
 // video node), so this crate ships its ArkTS (platform/harmony/ets/Index.ets) that `day build`
-// stages into the app's hvigor project via `[package.metadata.day.ohos]`. day-arkui's generic piece
+// stages into the app's hvigor project via `[package.metadata.day.ohos]`. day-toolkit-arkui's generic piece
 // bridge builds it and returns its FrameNode as an ordinary handle (docs/extending.md); commands
-// cross as this piece's own (cmd, arg) strings, and playback state comes back through day-arkui's
+// cross as this piece's own (cmd, arg) strings, and playback state comes back through day-toolkit-arkui's
 // `pieceEvent` export as the Custom event kind; `num` is the piece's report code.
 // ---------------------------------------------------------------------------
 
@@ -15,7 +15,7 @@ use super::*;
 use std::cell::RefCell;
 use std::collections::HashSet;
 
-use day_arkui::{AHandle, ArkUi, piece};
+use day_toolkit_arkui::{AHandle, ArkUi, piece};
 use day_spec::{NodeId, Proposal, Size};
 
 day_core::tls_group! {
@@ -91,6 +91,6 @@ fn release(_backend: &mut ArkUi, h: &AHandle) {
     AUDIO_ONLY.with(|s| s.borrow_mut().remove(&(h.0 as usize)));
 }
 
-day_pieces::renderer!(day_arkui::RENDERERS, ArkUi,
+day_pieces::renderer!(day_toolkit_arkui::RENDERERS, ArkUi,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);

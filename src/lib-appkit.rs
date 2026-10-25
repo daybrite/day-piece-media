@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::ptr::{NonNull, null_mut};
 
 use block2::RcBlock;
-use day_appkit::AppKit;
+use day_toolkit_appkit::AppKit;
 use day_spec::ffi_guard;
 use day_spec::{NodeId, Proposal, Size};
 use objc2::AnyThread;
@@ -196,7 +196,7 @@ impl MediaObserver {
     }
 
     fn report(&self, code: i32, text: String) {
-        day_appkit::emit(
+        day_toolkit_appkit::emit(
             self.ivars().node,
             Event::Custom {
                 tag: report::TAG,
@@ -237,7 +237,7 @@ define_class!(
         ) {
             log::debug!("day-piece-media: {} timed metadata group(s)", groups.len());
             if let Some(text) = metadata_text(groups) {
-                day_appkit::emit(
+                day_toolkit_appkit::emit(
                     self.ivars().node,
                     Event::Custom {
                         tag: report::TAG,
@@ -561,7 +561,7 @@ fn add_handler(command: &MPRemoteCommand, text: impl Fn(&AnyObject) -> String + 
             // SAFETY: the command center hands a live event for the call's duration.
             let text = text(unsafe { event.as_ref() });
             log::info!("day-piece-media: remote command {text}");
-            day_appkit::emit(
+            day_toolkit_appkit::emit(
                 node,
                 Event::Custom {
                     tag: report::TAG,
@@ -786,7 +786,7 @@ fn release(_backend: &mut AppKit, h: &Retained<NSView>) {
     live.observer.detach();
 }
 
-day_pieces::renderer!(day_appkit::RENDERERS, AppKit,
+day_pieces::renderer!(day_toolkit_appkit::RENDERERS, AppKit,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);
 

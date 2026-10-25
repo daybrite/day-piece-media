@@ -8,7 +8,7 @@ checks require their CI hosts; no CI run is claimed here.
 | macos-appkit | Final transport/timeline and secondary-window walkthroughs 59/59 |
 | macos-qt | Final transport/timeline and secondary-window walkthroughs 59/59 |
 | ios-uikit | Simulator build and walkthrough 49/49 |
-| android-mdc | API 36 emulator: final walkthrough plus activity recreation 65/65 |
+| android-material | API 36 emulator: final walkthrough plus activity recreation 65/65 |
 | web-dom | Playwright WebKit: walkthrough 49/49, including detached audio and screenshots |
 | macos-gtk | Build and walkthrough 32/32 with 18 playback assertions skipped; Homebrew GTK has no media backend |
 | harmony-arkui | Rust, native and ArkTS build/package succeeded against API 18; no local emulator acceptance run |
@@ -125,7 +125,7 @@ Two Windows jobs failed after `fab629a8` landed, with different symptoms:
   dependencies that moved were `day` (a CLI/packaging commit plus the `remove_subtree`
   null-parent fix in day-core) and this crate (`3191fb3e` → `fab629a8`). The crash is the new
   xaml `release` hook: it closed the `MediaPlayer` while the `MediaPlayerElement` was still
-  bound to it, and day-winui then freed the element. An element that was in the visual tree
+  bound to it, and day-toolkit-winui then freed the element. An element that was in the visual tree
   keeps a presenter on the player, and finalizing it against a closed player fails fast inside
   XAML. The hook now follows the order MediaPlayerElement documents for an app-owned player:
   pause, drop the source, `SetMediaPlayer(null)`, then `Close()`. The demo did not crash on the
@@ -180,7 +180,7 @@ three screenshots. The clip is bundled with the app.
 | macos-qt | Passed | 15/15 |
 | macos-gtk | Passed | 15/15, with playback assertions skipped because Homebrew GTK has no media backend |
 | ios-uikit | Passed on simulator | 15/15 |
-| android-mdc | Passed on emulator | 15/15 |
+| android-material | Passed on emulator | 15/15 |
 | web-dom | Passed in Chromium | 15/15 |
 | harmony-arkui | Passed on OpenHarmony QEMU | 12/15; the image lacks its file-source media plugin |
 
