@@ -1,6 +1,5 @@
 [package]
 name = "day-piece-media"
-publish = false
 version = "0.4.3"
 edition = "2024"
 rust-version = "1.89"
@@ -59,26 +58,26 @@ backends = ["appkit", "gtk", "qt", "uikit", "material", "xaml", "winui", "arkui"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-day-bridge = { git = "https://github.com/daybrite/day.git" }
-day-spec = { git = "https://github.com/daybrite/day.git" }
-day-core = { git = "https://github.com/daybrite/day.git" }
-day-pieces = { git = "https://github.com/daybrite/day.git" }
-day-reactive = { git = "https://github.com/daybrite/day.git" }
+day-bridge = "0.6"
+day-spec = "0.6"
+day-core = "0.6"
+day-pieces = "0.6"
+day-reactive = "0.6"
 linkme = { version = "0.3" }
 log = { version = "0.4" }
-day-toolkit-appkit = { git = "https://github.com/daybrite/day.git", optional = true }
-day-toolkit-gtk = { git = "https://github.com/daybrite/day.git", optional = true }
-day-toolkit-qt = { git = "https://github.com/daybrite/day.git", optional = true }
-day-platform-linux = { git = "https://github.com/daybrite/day.git", optional = true }
-day-toolkit-uikit = { git = "https://github.com/daybrite/day.git", optional = true }
-day-toolkit-material = { git = "https://github.com/daybrite/day.git", optional = true }
-day-platform-android = { git = "https://github.com/daybrite/day.git", optional = true }
-day-toolkit-arkui = { git = "https://github.com/daybrite/day.git", optional = true }
-day-toolkit-winui = { git = "https://github.com/daybrite/day.git", optional = true }
-day-toolkit-xaml-sys = { git = "https://github.com/daybrite/day.git", optional = true }
+day-toolkit-appkit = { version = "0.6", optional = true }
+day-toolkit-gtk = { version = "0.6", optional = true }
+day-toolkit-qt = { version = "0.6", optional = true }
+day-platform-linux = { version = "0.6", optional = true }
+day-toolkit-uikit = { version = "0.6", optional = true }
+day-toolkit-material = { version = "0.6", optional = true }
+day-platform-android = { version = "0.6", optional = true }
+day-toolkit-arkui = { version = "0.6", optional = true }
+day-toolkit-winui = { version = "0.6", optional = true }
+day-toolkit-xaml-sys = { version = "0.6", optional = true }
 gtk4 = { version = "0.11", optional = true }
 libloading = { version = "0.8", optional = true }
-day-toolkit-dom = { git = "https://github.com/daybrite/day.git", optional = true }
+day-toolkit-dom = { version = "0.6", optional = true }
 objc2 = { version = "0.6", optional = true }
 # NSImage: the now-playing artwork (MPMediaItemArtwork takes an image, src/lib-appkit.rs).
 objc2-app-kit = { version = "0.3", optional = true, features = ["NSView", "NSResponder", "NSImage"] }
@@ -96,15 +95,15 @@ dispatch2 = { version = "0.3", optional = true }
 block2 = { version = "0.6", optional = true }
 # The side probe of a stream's in-band metadata where the native player keeps it to itself
 # (src/icy.rs): one short request with `Icy-MetaData: 1`, through the platform's HTTP stack.
-day-part-http = { git = "https://github.com/daybrite/day.git" }
+day-part-http = "0.6"
 
 [build-dependencies]
-day-build = { git = "https://github.com/daybrite/day.git" }
-day-toolchain = { git = "https://github.com/daybrite/day.git" }
+day-build = "0.6"
+day-toolchain = "0.6"
 cc = "1"
 
 [dev-dependencies]
-day-mock = { git = "https://github.com/daybrite/day.git" }
+day-mock = "0.6"
 
 # Standalone-piece Android contribution (docs/extending.md). The day CLI reads this from
 # `cargo metadata` and folds it into the app's Gradle build; the piece carries its backend

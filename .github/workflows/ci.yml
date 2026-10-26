@@ -7,6 +7,11 @@ on:
     tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      day-main:
+        description: Build against day's main branch instead of the newest release
+        type: boolean
+        default: false
   schedule:
     # Daily: day's main moves on weeks nobody pushes here.
     - cron: "0 10 * * *"
@@ -32,6 +37,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Day from crates.io, or from main on a push (daybrite/actions day-deps).
+      - uses: daybrite/actions/.github/actions/day-deps@v1
+        with:
+          day-deps: ${{ inputs.day-main && 'main' || 'auto' }}
       - name: Install the toolkit and media libraries
         if: runner.os == 'Linux'
         # Day owns toolkit prerequisites, including SVG; this piece adds playback libraries.
@@ -74,17 +83,24 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      # Day from crates.io, or from main on a push (daybrite/actions day-deps).
+      - uses: daybrite/actions/.github/actions/day-deps@v1
+        with:
+          day-deps: ${{ inputs.day-main && 'main' || 'auto' }}
       - run: cargo clippy --target ${{ matrix.target }} --features ${{ matrix.features }} -- -D warnings
 
   demo:
     uses: daybrite/actions/.github/workflows/dayapp.yml@v1
     permissions:
       contents: write # release-asset upload on tag builds
+      id-token: write # crates.io Trusted Publishing (publish-crates)
     secrets: inherit
     with:
       project-path: demo
       targets: macos-appkit, linux-gtk, linux-qt, windows-winui, ios-uikit, android-material, web-dom, harmony-arkui
-      update-day-deps: true
+      day-deps: ${{ inputs.day-main && 'main' || 'auto' }}
+      # On a version tag, after every leg passed: the library crates to crates.io.
+      publish-crates: true
       scripts: dayscript/walkthrough.yaml
       target-scripts: |
         android-material: dayscript/walkthrough.yaml dayscript/android-lifecycle.yaml

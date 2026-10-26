@@ -21,7 +21,7 @@ metadata (ID3, MP4, FLAC, Ogg Vorbis, Opus, WAV, AIFF) from its headers, for lib
 
 ```toml
 [dependencies]
-day-piece-media = { git = "https://github.com/daybrite/day-piece-media.git" }
+day-piece-media = "0.4"
 ```
 
 ```rust

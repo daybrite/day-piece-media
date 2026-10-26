@@ -81,6 +81,9 @@ struct ObserverIvars {
     node: NodeId,
     looping: bool,
     resume_after_interruption: std::cell::Cell<bool>,
+    /// The rate `.rate()` chose. iOS 16 and later keep it in the player's `defaultRate`, which
+    /// `play` starts at; iOS 15 has no such property, so this is the rate there.
+    rate: std::cell::Cell<f32>,
 }
 
 define_class!(
@@ -103,7 +106,7 @@ define_class!(
             } else if self.ivars().resume_after_interruption.replace(false)
                 && notification_integer(note, "AVAudioSessionInterruptionOptionKey") & 1 != 0 {
                 activate_audio_session();
-                unsafe { player.play(); }
+                self.play();
             }
         }
         #[unsafe(method(audioRouteChanged:))]
@@ -123,10 +126,8 @@ define_class!(
             }
             let player = &self.ivars().player;
             if self.ivars().looping {
-                unsafe {
-                    player.seekToTime(kCMTimeZero);
-                    player.play();
-                }
+                unsafe { player.seekToTime(kCMTimeZero) };
+                self.play();
             } else {
                 self.report(report::ENDED, String::new());
             }
@@ -171,6 +172,39 @@ define_class!(
 );
 
 impl MediaObserver {
+    /// Whether the player has `defaultRate` (iOS 16 and later).
+    fn has_default_rate(&self) -> bool {
+        self.ivars().player.respondsToSelector(sel!(defaultRate))
+    }
+
+    /// Starts the player at the chosen rate. Without `defaultRate`, `play` would start at 1, so
+    /// iOS 15 sets the rate itself, which plays just as `play` does.
+    fn play(&self) {
+        let player = &self.ivars().player;
+        let rate = self.ivars().rate.get();
+        unsafe {
+            if self.has_default_rate() || rate == 1.0 {
+                player.play();
+            } else {
+                player.setRate(rate);
+            }
+        }
+    }
+
+    /// Chooses the rate the next `play` starts at, and changes it now when playing.
+    fn set_rate(&self, rate: f32) {
+        let player = &self.ivars().player;
+        self.ivars().rate.set(rate);
+        unsafe {
+            if self.has_default_rate() {
+                player.setDefaultRate(rate);
+            }
+            if player.rate() != 0.0 {
+                player.setRate(rate);
+            }
+        }
+    }
+
     fn new(
         mtm: MainThreadMarker,
         player: Retained<AVPlayer>,
@@ -182,6 +216,7 @@ impl MediaObserver {
             node,
             looping,
             resume_after_interruption: std::cell::Cell::new(false),
+            rate: std::cell::Cell::new(1.0),
         });
         let this: Retained<Self> = unsafe { msg_send![super(this), init] };
         let center = NSNotificationCenter::defaultCenter();
@@ -760,17 +795,14 @@ fn make(_backend: &mut Uikit, p: &MediaProps, id: NodeId) -> Retained<UIView> {
 }
 
 fn update(_backend: &mut Uikit, h: &Retained<UIView>, patch: &MediaPatch) {
-    let Some((player, metadata, node)) = LIVE.with(|m| {
-        m.borrow().get(&key_of(h)).map(|l| {
-            (
-                l.player.clone(),
-                l.metadata.clone(),
-                l.observer.ivars().node,
-            )
-        })
+    let Some((player, metadata, observer)) = LIVE.with(|m| {
+        m.borrow()
+            .get(&key_of(h))
+            .map(|l| (l.player.clone(), l.metadata.clone(), l.observer.clone()))
     }) else {
         return;
     };
+    let node = observer.ivars().node;
     if matches!(
         patch,
         MediaPatch::Pause | MediaPatch::Stop | MediaPatch::Load(_)
@@ -785,7 +817,7 @@ fn update(_backend: &mut Uikit, h: &Retained<UIView>, patch: &MediaPatch) {
         MediaPatch::Background(_) => {}
         MediaPatch::NowPlaying(info) => publish_now_playing(node, info.as_ref()),
         MediaPatch::Poll => {
-            let timeline = timeline_of(&player);
+            let timeline = timeline_of(&observer);
             LIVE.with(|m| {
                 if let Some(live) = m.borrow().get(&key_of(h)) {
                     live.observer.report(report::TIMELINE, timeline.encode());
@@ -793,7 +825,7 @@ fn update(_backend: &mut Uikit, h: &Retained<UIView>, patch: &MediaPatch) {
             });
         }
         MediaPatch::Seek(seconds) => {
-            let timeline = timeline_of(&player);
+            let timeline = timeline_of(&observer);
             if let Some(target) = timeline.seek_target(*seconds) {
                 unsafe {
                     player.seekToTime_toleranceBefore_toleranceAfter(
@@ -811,22 +843,19 @@ fn update(_backend: &mut Uikit, h: &Retained<UIView>, patch: &MediaPatch) {
                 });
             }
         }
-        MediaPatch::Rate(rate) => unsafe {
+        MediaPatch::Rate(rate) => {
             if valid_rate(*rate) {
-                player.setDefaultRate(*rate as f32);
-                if player.rate() != 0.0 {
-                    player.setRate(*rate as f32);
-                }
+                observer.set_rate(*rate as f32);
             }
-        },
+        }
         MediaPatch::Load(url) => {
             let mtm = MainThreadMarker::new().unwrap();
             load_url(&player, url, &metadata, mtm);
-            unsafe { player.play() };
+            observer.play();
         }
         MediaPatch::Play => {
             activate_audio_session();
-            unsafe { player.play() };
+            observer.play();
         }
         MediaPatch::Pause => unsafe { player.pause() },
         // Dropping the item is what lets a live stream's connection go; the KVO on
@@ -868,10 +897,11 @@ day_pieces::renderer!(day_toolkit_uikit::RENDERERS, Uikit,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);
 
-fn timeline_of(player: &AVPlayer) -> MediaTimeline {
+fn timeline_of(observer: &MediaObserver) -> MediaTimeline {
+    let player = &observer.ivars().player;
     let mut value = MediaTimeline::default();
     unsafe {
-        value.rate = player.defaultRate() as f64;
+        value.rate = observer.ivars().rate.get() as f64;
         value.capabilities.volume = true;
         let Some(item) = player.currentItem() else {
             return value;
