@@ -5,7 +5,7 @@
 // (build.rs probes pkg-config and defines DAY_MEDIA_QT_MM) this wraps QMediaPlayer + QAudioOutput
 // (+ a QVideoWidget unless the player is sound-only). When it is not (some minimal Qt installs),
 // it degrades to a QLabel showing the URL, so the app still builds/launches/screenshots (mirrors
-// day-piece-webview's MSYS2 degrade). The C ABI is identical either way, so lib-qt.rs is
+// day-piece-webview's degrade without Qt WebEngine). The C ABI is identical either way, so lib-qt.rs is
 // unchanged. Note QVideoWidget ships no transport chrome, so the piece's `.controls` flag is a
 // no-op on Qt; playback is driven through day_media_play/pause/stop (the front-end's triggers).
 // `Load` also starts playback, matching the other backends.
