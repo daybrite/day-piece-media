@@ -27,14 +27,14 @@ name = "dayapp"
 crate-type = ["rlib"]
 
 [dependencies]
-day = { package = "day-app", version = "0.6" }
-day-piece-media = { path = ".." }
+day = { package = "day-app", version = "0.*" }
+day-piece-media = { version = "0.*", path = ".." }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-day-part-filesystem = "0.6"
+day-part-filesystem = "0.*"
 
 [build-dependencies]
-day-build = "0.6"
+day-build = "0.*"
 
 
 [workspace]
