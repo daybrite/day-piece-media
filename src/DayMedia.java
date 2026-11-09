@@ -196,14 +196,13 @@ public final class DayMedia {
                 .putExtra("description", live.background.optString("description"))
                 .putExtra("channel", live.background.optString("channel_name"));
             try {
-                if (android.os.Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent);
-                else context.startService(intent);
+                DayMediaService.requestStart(context, intent);
             } catch (RuntimeException error) {
                 live.report(8, "background:" + error.getClass().getSimpleName());
             }
             return;
         }
-        context.stopService(new Intent(context, DayMediaService.class));
+        DayMediaService.requestStop(context);
     }
 
     /** Where a source is opened and an old player torn down. `setDataSource` on an http URI

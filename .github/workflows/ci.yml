@@ -56,6 +56,12 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo clippy --features ${{ matrix.features }} -- -D warnings
       - run: cargo test
+      - name: Check Qt audio pause, seek and resume
+        if: matrix.features == 'qt'
+        run: |
+          read -r -a qt_flags <<< "$(pkg-config --cflags --libs Qt6MultimediaWidgets Qt6Multimedia Qt6Widgets)"
+          c++ -std=c++17 -fPIC -DDAY_MEDIA_QT_MM tests/qt-playback.cpp src/lib-qt-shim.cpp "${qt_flags[@]}" -o "$RUNNER_TEMP/qt-playback"
+          QT_QPA_PLATFORM=offscreen "$RUNNER_TEMP/qt-playback" "$PWD/demo/resource/assets/sample.mp4"
       - uses: actions/setup-node@v6
         if: matrix.features == 'gtk'
         with:

@@ -77,9 +77,12 @@ public:
             return;
         case QMediaPlayer::LoadingMedia:
         case QMediaPlayer::StalledMedia:
-        case QMediaPlayer::BufferingMedia:
             report(1);
             return;
+        // BufferingMedia still has enough data to play. In particular, an audio-only
+        // player can remain in this status after seek/rate/resume while its clock advances.
+        // Preserve PlayingState/PausedState instead of reporting a permanent Loading.
+        case QMediaPlayer::BufferingMedia:
         default:
             break;
         }

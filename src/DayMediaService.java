@@ -23,15 +23,30 @@ public final class DayMediaService extends Service {
     /** The extra naming a transport command a notification button sends back (a REMOTE wire form). */
     private static final String COMMAND = "command";
     private static boolean running;
+    // All calls and lifecycle callbacks run on the main thread. A fast source replacement
+    // can stop playback before Android delivers the foreground start request. Do not cancel
+    // that service until it has fulfilled its startForeground obligation.
+    private static int pendingStarts;
+    static void requestStart(Context context, Intent intent) {
+        pendingStarts++;
+        try {
+            if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent);
+            else context.startService(intent);
+        } catch (RuntimeException error) {
+            pendingStarts--;
+            throw error;
+        }
+    }
+    static void requestStop(Context context) {
+        if (pendingStarts == 0) context.stopService(new Intent(context, DayMediaService.class));
+    }
     private static String title = "", description = "";
     @Override public IBinder onBind(Intent intent) { return null; }
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null) { stopSelf(); return START_NOT_STICKY; }
-        // A notification button: route it into the session callback's owner, then keep going so
-        // the foreground notification is (re)posted for whatever state the command leads to.
+        // Notification commands do not originate from requestStart.
         String command = intent.getStringExtra(COMMAND);
-        if (command != null) DayMedia.remote(command);
-        if (!DayMedia.hasBackgroundPlayback()) { stopSelf(); return START_NOT_STICKY; }
+        if (command == null && pendingStarts > 0) pendingStarts--;
         if (intent.hasExtra("title")) {
             title = intent.getStringExtra("title");
             description = intent.getStringExtra("description");
@@ -40,7 +55,14 @@ public final class DayMediaService extends Service {
                 new NotificationChannel(CHANNEL, channel, NotificationManager.IMPORTANCE_LOW));
         }
         running = true;
+        // Promote even if the source stopped while this intent was in flight. Stopping first
+        // can leave Android's foreground-start timer armed and crash the entire application.
         startForeground(NOTIFICATION, build(this));
+        if (command != null) DayMedia.remote(command);
+        if (!DayMedia.hasBackgroundPlayback() && pendingStarts == 0) {
+            stopForeground(STOP_FOREGROUND_REMOVE);
+            stopSelfResult(startId);
+        }
         return START_NOT_STICKY;
     }
     @Override public void onDestroy() { running = false; super.onDestroy(); }

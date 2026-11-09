@@ -1,6 +1,6 @@
 [package]
 name = "day-piece-media"
-version = "0.4.3"
+version = "0.4.4"
 edition = "2024"
 rust-version = "1.89"
 description = "Native audio and video playback for Day applications"
@@ -161,3 +161,8 @@ frameworks = ["AVKit", "AVFoundation", "CoreMedia", "MediaPlayer"]
 toolkit = "qt"
 name = "QT_MEDIA_BACKEND"
 value = "ffmpeg"
+
+# GTK's media backend loads GStreamer elements dynamically; ldd alone cannot bundle them.
+[[package.metadata.day.appimage.plugins]]
+toolkit = "gtk"
+name = "gstreamer"

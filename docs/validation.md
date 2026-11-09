@@ -233,3 +233,20 @@ The wrapper also reports coverage-table drift because it compares generated outp
 HEAD, which still contains the extracted crate. The updated table was checked separately:
 regenerating it produced identical bytes. The remaining core lint legs passed; Windows was
 unavailable on this host. Nothing was staged or committed to satisfy that comparison.
+
+## Linux packaging and playback regressions
+
+GTK AppImages request the `gstreamer` linuxdeploy plugin through this crate's metadata.
+The plugin bundles dynamically loaded elements such as `playbin3` and the plugin scanner;
+linking the GStreamer libraries alone does not include them. The shared setup action installs
+the pinned plugin, and the CLI fails packaging if a requested plugin is absent.
+
+The Qt host job compiles `tests/qt-playback.cpp` with the actual native bridge and the committed
+sample clip. It checks pause, seek, rate changes, resumed playback state, and position progress.
+Qt's `BufferingMedia` status permits playback to continue, so the bridge uses `playbackState()`
+there; treating it as `Loading` leaves audio-only clients stuck in loading after resume.
+
+Android foreground-service requests remain pending until `onStartCommand` promotes the service.
+A rapid stop or track change cannot cancel that promotion; once promoted, a service with no
+remaining playback stops itself. This prevents the foreground-start timeout during short-track
+playback and responsive-shell changes. The Tunes fixture walkthrough exercises these transitions.
