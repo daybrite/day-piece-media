@@ -54,7 +54,7 @@ extern "C" fn on_state(id: u64, code: c_int, text: *const c_char) {
         NodeId(id),
         Event::Custom {
             tag: report::TAG,
-            num: code as f64,
+            num: f64::from(code),
             text,
         },
     );
@@ -73,14 +73,14 @@ fn make(_backend: &mut Qt, p: &MediaProps, id: NodeId) -> QtHandle {
         day_media_new(
             id.0,
             cstr(&p.url).as_ptr(),
-            p.autoplay as c_int,
-            p.looping as c_int,
-            p.muted as c_int,
-            p.audio_only as c_int,
+            c_int::from(p.autoplay),
+            c_int::from(p.looping),
+            c_int::from(p.muted),
+            c_int::from(p.audio_only),
             p.volume.clamp(0.0, 1.0),
         )
     });
-    nodes::remember(&handle, id);
+    nodes::remember(handle, id);
     handle
 }
 
@@ -96,15 +96,15 @@ mod nodes {
         static NODES: RefCell<HashMap<usize, NodeId>> = RefCell::new(HashMap::new());
     }
 
-    pub(super) fn remember(h: &QtHandle, id: NodeId) {
+    pub(super) fn remember(h: QtHandle, id: NodeId) {
         NODES.with(|n| n.borrow_mut().insert(h.0 as usize, id));
     }
 
-    pub(super) fn forget(h: &QtHandle) {
+    pub(super) fn forget(h: QtHandle) {
         NODES.with(|n| n.borrow_mut().remove(&(h.0 as usize)));
     }
 
-    pub(super) fn of(h: &QtHandle) -> Option<NodeId> {
+    pub(super) fn of(h: QtHandle) -> Option<NodeId> {
         NODES.with(|n| n.borrow().get(&(h.0 as usize)).copied())
     }
 }
@@ -113,22 +113,22 @@ mod nodes {
 mod nodes {
     use super::*;
 
-    pub(super) fn remember(_h: &QtHandle, _id: NodeId) {}
-    pub(super) fn forget(_h: &QtHandle) {}
+    pub(super) fn remember(_h: QtHandle, _id: NodeId) {}
+    pub(super) fn forget(_h: QtHandle) {}
 }
 
 /// Linux's now-playing surface is MPRIS (src/mpris.rs): the shell's media controls and
 /// `playerctl` read it, and their commands come back as `REMOTE` reports on this node. macOS
 /// has no session bus by default, so the macos-qt build publishes nothing.
 #[cfg(target_os = "linux")]
-fn now_playing(h: &QtHandle, info: Option<&NowPlayingInfo>) {
+fn now_playing(h: QtHandle, info: Option<&NowPlayingInfo>) {
     if let Some(id) = nodes::of(h) {
         crate::mpris::install(|node, text| {
             day_toolkit_qt::emit(
                 node,
                 Event::Custom {
                     tag: report::TAG,
-                    num: report::REMOTE as f64,
+                    num: f64::from(report::REMOTE),
                     text,
                 },
             )
@@ -138,7 +138,7 @@ fn now_playing(h: &QtHandle, info: Option<&NowPlayingInfo>) {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn now_playing(_h: &QtHandle, _info: Option<&NowPlayingInfo>) {}
+fn now_playing(_h: QtHandle, _info: Option<&NowPlayingInfo>) {}
 
 fn update(_backend: &mut Qt, h: &QtHandle, patch: &MediaPatch) {
     unsafe {
@@ -147,7 +147,7 @@ fn update(_backend: &mut Qt, h: &QtHandle, patch: &MediaPatch) {
             MediaPatch::Seek(value) => day_media_seek(h.0, *value),
             MediaPatch::Rate(value) => day_media_rate(h.0, *value),
             MediaPatch::Background(_) => {}
-            MediaPatch::NowPlaying(info) => now_playing(h, info.as_ref()),
+            MediaPatch::NowPlaying(info) => now_playing(*h, info.as_ref()),
             MediaPatch::Poll => day_media_poll(h.0),
             MediaPatch::Play => day_media_play(h.0),
             MediaPatch::Pause => day_media_pause(h.0),
@@ -166,8 +166,9 @@ fn measure(backend: &mut Qt, h: &QtHandle, proposal: Proposal) -> Size {
 }
 
 /// Forget the handle's node; day-toolkit-qt frees the widget itself.
+#[expect(clippy::trivially_copy_pass_by_ref, reason = "the renderer table fixes this signature")]
 fn release(_backend: &mut Qt, h: &QtHandle) {
-    nodes::forget(h);
+    nodes::forget(*h);
 }
 
 day_pieces::renderer!(day_toolkit_qt::RENDERERS, Qt,

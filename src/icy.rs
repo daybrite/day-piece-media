@@ -34,7 +34,15 @@ mod stub {
         pub fn new(_sink: AnyBinding<Option<StreamMetadata>>) -> Rc<Probe> {
             Rc::new(Probe)
         }
+        #[expect(
+            clippy::unused_self,
+            reason = "the web stub keeps the native probe's method signatures"
+        )]
         pub fn start(&self, _url: String) {}
+        #[expect(
+            clippy::unused_self,
+            reason = "the web stub keeps the native probe's method signatures"
+        )]
         pub fn stop(&self) {}
     }
 }
@@ -92,13 +100,12 @@ mod native {
             *self.cancel.borrow_mut() = Some(cancel.clone());
             let id = self.id;
             log::info!("day-piece-media: ICY probe starting for {url}");
-            std::thread::Builder::new()
+            if let Err(e) = std::thread::Builder::new()
                 .name("day-media-icy".into())
                 .spawn(move || worker(id, url, cancel))
-                .map(|_| ())
-                .unwrap_or_else(|e| {
-                    log::warn!("day-piece-media: no thread for the ICY probe: {e}")
-                });
+            {
+                log::warn!("day-piece-media: no thread for the ICY probe: {e}");
+            }
         }
 
         pub fn stop(&self) {
@@ -123,6 +130,10 @@ mod native {
     }
 
     /// The worker: probe, deliver, sleep, until cancelled or the stream proves silent.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the worker runs on its own thread and owns its arguments"
+    )]
     fn worker(id: u64, url: String, cancel: Arc<AtomicBool>) {
         let mut last: Option<String> = None;
         loop {
@@ -279,7 +290,7 @@ mod native {
         /// Against a live Icecast server; run by hand: `cargo test -p day-piece-media -- --ignored
         /// --nocapture probe_live`.
         #[test]
-        #[ignore]
+        #[ignore = "needs a live Icecast server"]
         fn probe_live() {
             let cancel = Arc::new(AtomicBool::new(false));
             match probe_once("https://ice5.somafm.com/groovesalad-128-mp3", &cancel) {

@@ -63,7 +63,7 @@ unsafe extern "C" {
 
 /// One state report from the shim: the code is the piece's own, the text an error's message.
 ///
-/// MediaPlayer raises its events on a worker thread, and day takes events only on the UI thread:
+/// `MediaPlayer` raises its events on a worker thread, and day takes events only on the UI thread:
 /// day-toolkit-winui's event sink is thread-local, so an emit made on the worker reached no sink and was
 /// dropped (the video played while the demo's state label still read "Idle"). Every report rides
 /// `Platform::post` home instead, which also queues the shim's own UI-thread reports (Stop's
@@ -81,7 +81,7 @@ extern "C" fn on_state(id: u64, code: c_int, text: *const c_char) {
             NodeId(id),
             Event::Custom {
                 tag: report::TAG,
-                num: code as f64,
+                num: f64::from(code),
                 text,
             },
         );
@@ -99,11 +99,11 @@ fn make(_backend: &mut Xaml, p: &MediaProps, id: NodeId) -> WinHandle {
         day_media_xaml_new(
             id.0,
             cstr(&p.url).as_ptr(),
-            p.autoplay as c_int,
-            p.looping as c_int,
-            p.muted as c_int,
-            p.controls as c_int,
-            p.audio_only as c_int,
+            c_int::from(p.autoplay),
+            c_int::from(p.looping),
+            c_int::from(p.muted),
+            c_int::from(p.controls),
+            c_int::from(p.audio_only),
             p.volume.clamp(0.0, 1.0),
         )
     })
@@ -142,7 +142,7 @@ fn now_playing(h: &WinHandle, info: Option<&NowPlayingInfo>) {
     unsafe {
         day_media_xaml_now_playing(
             h.0,
-            info.is_some() as c_int,
+            c_int::from(info.is_some()),
             title.as_ptr(),
             artist.as_ptr(),
             album.as_ptr(),
@@ -151,10 +151,10 @@ fn now_playing(h: &WinHandle, info: Option<&NowPlayingInfo>) {
             duration,
             i.position,
             i.rate,
-            i.playing as c_int,
-            i.live as c_int,
-            i.has_next as c_int,
-            i.has_previous as c_int,
+            c_int::from(i.playing),
+            c_int::from(i.live),
+            c_int::from(i.has_next),
+            c_int::from(i.has_previous),
         );
     }
 }

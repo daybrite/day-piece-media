@@ -107,6 +107,10 @@ impl AudioSession {
     }
     /// Load a URL, file path, or platform content URI. Each load has a fresh event target;
     /// delayed callbacks from the previous source can never finish the new queue item.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `source` is empty or contains a NUL character.
     pub fn load(&self, source: impl Into<String>, autoplay: bool) -> Result<u64, MediaError> {
         let source = source.into();
         if source.trim().is_empty() || source.contains('\0') {
@@ -193,7 +197,7 @@ impl AudioSession {
                     move |value, _| {
                         let mut snapshot = sink.get_untracked();
                         if snapshot.generation == generation {
-                            snapshot.metadata = value.clone();
+                            snapshot.metadata.clone_from(value);
                             snapshot.sequence += 1;
                             sink.set(snapshot);
                         }
@@ -235,6 +239,13 @@ impl AudioSession {
         }
         Ok(generation)
     }
+    #[cfg_attr(
+        all(feature = "material", target_os = "android"),
+        expect(
+            clippy::needless_pass_by_value,
+            reason = "the other targets box the patch"
+        )
+    )]
     fn command(&self, patch: MediaPatch) {
         #[cfg(not(all(feature = "material", target_os = "android")))]
         {
@@ -260,7 +271,7 @@ impl AudioSession {
     /// the item changes, and again when the state or position jumps; the system advances
     /// the clock itself from `rate` while playing.
     pub fn now_playing(&self, info: Option<NowPlayingInfo>) {
-        *self.0.now_playing.borrow_mut() = info.clone();
+        (*self.0.now_playing.borrow_mut()).clone_from(&info);
         self.command(MediaPatch::NowPlaying(info));
     }
     /// Receive the system's transport commands aimed at this session's player.
@@ -284,6 +295,9 @@ impl AudioSession {
         });
         drop(old);
     }
+    /// # Errors
+    ///
+    /// Returns an error when `volume` is not finite.
     pub fn set_volume(&self, volume: f64) -> Result<(), MediaError> {
         if !volume.is_finite() {
             return Err(MediaError::invalid("volume"));
@@ -293,6 +307,9 @@ impl AudioSession {
         self.command(MediaPatch::Volume(volume));
         Ok(())
     }
+    /// # Errors
+    ///
+    /// Returns an error when `rate` is not a valid playback rate.
     pub fn set_rate(&self, rate: f64) -> Result<(), MediaError> {
         if !valid_rate(rate) {
             return Err(MediaError::invalid("rate"));
@@ -302,6 +319,11 @@ impl AudioSession {
         Ok(())
     }
     /// Only seeks a loaded source with a reported seek range. Completion is asynchronous.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `seconds` is negative or not finite, or when no loaded source reports
+    /// a seek range.
     pub fn seek(&self, seconds: f64) -> Result<(), MediaError> {
         if !seconds.is_finite() || seconds < 0.0 {
             return Err(MediaError::invalid("seek"));
@@ -366,10 +388,10 @@ mod android_observation {
                         }
                     }
                     report::METADATA => {
-                        snapshot.metadata = Some(StreamMetadata::from_report(&text))
+                        snapshot.metadata = Some(StreamMetadata::from_report(&text));
                     }
                     _ => {
-                        snapshot.state = PlaybackState::from_report(code as f64, &text);
+                        snapshot.state = PlaybackState::from_report(f64::from(code), &text);
                         if code == report::ERROR {
                             snapshot.error = Some(MediaError {
                                 kind: MediaErrorKind::Playback,
@@ -423,7 +445,7 @@ mod tests {
             first,
             Event::Custom {
                 tag: report::TAG,
-                num: report::ENDED as f64,
+                num: f64::from(report::ENDED),
                 text: String::new(),
             },
         );
@@ -434,7 +456,7 @@ mod tests {
             second,
             Event::Custom {
                 tag: report::TAG,
-                num: report::PAUSED as f64,
+                num: f64::from(report::PAUSED),
                 text: String::new(),
             },
         );

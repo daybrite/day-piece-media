@@ -11,6 +11,13 @@ pub fn window() -> day::WindowOptions {
     res::window_options().size(860.0, 840.0)
 }
 
+#[cfg_attr(
+    target_arch = "wasm32",
+    expect(
+        clippy::needless_pass_by_value,
+        reason = "the native arm passes the name on by value"
+    )
+)]
 fn asset_url(asset: day::prelude::AssetName) -> String {
     #[cfg(target_arch = "wasm32")]
     {
@@ -40,7 +47,7 @@ fn status(state: PlaybackState) -> String {
         }
     }
 }
-fn timeline_text(value: MediaTimeline) -> String {
+fn timeline_text(value: &MediaTimeline) -> String {
     match value.duration {
         Some(duration) => res::str::timeline(res::str::Timeline {
             duration: duration.round() as i64,
@@ -117,7 +124,7 @@ fn window_content() -> impl Piece {
                 })
                 .id(day::id!(new_window)),
             label(move || status(snapshot.get().state)).id(day::id!(session_state)),
-            label(move || timeline_text(snapshot.get().timeline)).id(day::id!(session_timeline)),
+            label(move || timeline_text(&snapshot.get().timeline)).id(day::id!(session_timeline)),
             label(move || {
                 if snapshot.get().timeline.capabilities.seek {
                     res::str::seek_ready().format()
@@ -171,7 +178,7 @@ fn video_example() -> impl Piece {
             .id(day::id!(media_player))
             .height(180.0),
         label(move || status(state.get())).id(day::id!(media_state)),
-        label(move || timeline_text(timeline.get())).id(day::id!(media_timeline)),
+        label(move || timeline_text(&timeline.get())).id(day::id!(media_timeline)),
         row((
             button(res::str::play())
                 .action(move || play.notify())

@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: MPL-2.0
 
 //! day-piece-media: an external Day Piece (DESIGN.md §15) wrapping each toolkit's native media
-//! player: AVPlayerView on AppKit, AVPlayerViewController on UIKit, QMediaPlayer + QVideoWidget on
-//! Qt, `android.widget.VideoView` (or a bare `MediaPlayer` for sound) on Android, GtkVideo on GTK,
-//! MediaPlayerElement on XAML, `<video>`/`<audio>` on the web, and an ArkTS `Video` / `AVPlayer` on
+//! player: `AVPlayerView` on AppKit, `AVPlayerViewController` on UIKit, `QMediaPlayer` + `QVideoWidget` on
+//! Qt, `android.widget.VideoView` (or a bare `MediaPlayer` for sound) on Android, `GtkVideo` on GTK,
+//! `MediaPlayerElement` on XAML, `<video>`/`<audio>` on the web, and an ArkTS `Video` / `AVPlayer` on
 //! HarmonyOS. One Rust API registered link-time into each backend's renderer slice without touching
 //! day. Like the webview it carries both a front-end and its native backends, including an
 //! Android manifest permission contribution (INTERNET) and an iOS framework contribution (AVKit +
@@ -27,9 +27,9 @@
 //! the readback docs/media.md reserved the channel for: native chrome, the network, and the app's
 //! own triggers all move the player, and the binding is where they agree.
 //!
-//! Native chrome (`.controls(true)`, the default) is free where the toolkit has it: AVPlayerView's
-//! inline controls, AVPlayerViewController's playback controls, Android's MediaController. Qt's
-//! QVideoWidget has no built-in chrome (drive it with triggers), and GtkVideo's overlay controls
+//! Native chrome (`.controls(true)`, the default) is free where the toolkit has it: `AVPlayerView`'s
+//! inline controls, `AVPlayerViewController`'s playback controls, Android's `MediaController`. Qt's
+//! `QVideoWidget` has no built-in chrome (drive it with triggers), and `GtkVideo`'s overlay controls
 //! are always on. See docs/media.md for the per-backend caveats.
 
 #[cfg(feature = "dom")]
@@ -319,6 +319,7 @@ impl StreamMetadata {
 
 /// A native media player bound to `url`. Attach command triggers with `.play()/.pause()/.load()`;
 /// fire them (`Trigger::notify`) from buttons.
+#[must_use]
 pub struct Media {
     url: TextSource,
     autoplay: bool,
@@ -389,7 +390,7 @@ impl Media {
         self
     }
     /// Hide the toolkit's native transport chrome (shown by default where the toolkit has one).
-    /// Qt has no free chrome (use triggers) and GtkVideo's overlay controls cannot be hidden; see
+    /// Qt has no free chrome (use triggers) and `GtkVideo`'s overlay controls cannot be hidden; see
     /// docs/media.md.
     pub fn no_controls(mut self) -> Self {
         self.controls = false;
@@ -530,20 +531,20 @@ impl Media {
         // Each command trigger → one patch. `watch` never fires for the initial value, so wiring
         // these does not issue a spurious command at build time (the initial url loads via props).
         if let Some(play) = play {
-            watch(move || play.track(), move |_, _| send(MediaPatch::Play));
+            watch(move || play.track(), move |(), _| send(MediaPatch::Play));
         }
         if let Some(pause) = pause {
-            watch(move || pause.track(), move |_, _| send(MediaPatch::Pause));
+            watch(move || pause.track(), move |(), _| send(MediaPatch::Pause));
         }
         if let Some(stop) = stop {
             let probe = probe.clone();
             watch(
                 move || stop.track(),
-                move |_, _| {
+                move |(), _| {
                     if let Some(p) = &probe {
                         p.stop();
                     }
-                    send(MediaPatch::Stop)
+                    send(MediaPatch::Stop);
                 },
             );
         }
@@ -557,7 +558,7 @@ impl Media {
             let probe = probe.clone();
             watch(
                 move || load.track(),
-                move |_, _| {
+                move |(), _| {
                     let url = untrack(|| read());
                     if let Some(sink) = timeline {
                         sink.set(MediaTimeline::default());
@@ -571,7 +572,7 @@ impl Media {
                     if let Some(p) = &probe {
                         p.start(url.clone());
                     }
-                    send(MediaPatch::Load(url))
+                    send(MediaPatch::Load(url));
                 },
             );
         }
@@ -585,7 +586,7 @@ impl Media {
         if let Some((seconds, trigger)) = seek {
             watch(
                 move || trigger.track(),
-                move |_, _| {
+                move |(), _| {
                     let value = seconds.get_untracked();
                     if value.is_finite() && value >= 0.0 {
                         send(MediaPatch::Seek(value));
@@ -823,7 +824,7 @@ mod tests {
         assert_eq!(m.raw, "Miles Davis - So What");
         let m = StreamMetadata::from_report("Morning Show");
         assert_eq!(m.title, "Morning Show");
-        assert!(m.artist.is_empty());
+        assert_eq!(m.artist, "");
         let m = StreamMetadata::from_report("So What\u{1f}Miles Davis\u{1f}Kind of Blue");
         assert_eq!(m.album, "Kind of Blue");
         assert_eq!(m.raw, "So What - Miles Davis - Kind of Blue");
@@ -852,11 +853,11 @@ mod tests {
     #[test]
     fn reports_decode_to_states() {
         assert_eq!(
-            PlaybackState::from_report(report::PLAYING as f64, ""),
+            PlaybackState::from_report(f64::from(report::PLAYING), ""),
             PlaybackState::Playing
         );
         assert_eq!(
-            PlaybackState::from_report(report::ERROR as f64, "no route to host"),
+            PlaybackState::from_report(f64::from(report::ERROR), "no route to host"),
             PlaybackState::Error("no route to host".into())
         );
         assert_eq!(PlaybackState::from_report(42.0, ""), PlaybackState::Idle);

@@ -82,6 +82,10 @@ pub fn is_audio_extension(ext: &str) -> bool {
 }
 
 /// Opens `path` and reads its tags. Errors only when the file cannot be opened or read.
+///
+/// # Errors
+///
+/// Returns the I/O error when the file cannot be opened or read.
 pub fn read_file(path: &Path) -> io::Result<Tags> {
     let mut reader = BufReader::new(File::open(path)?);
     read_from(&mut reader)
@@ -90,6 +94,10 @@ pub fn read_file(path: &Path) -> io::Result<Tags> {
 /// Reads the tags of whatever `reader` holds, detecting the container by its magic numbers (an
 /// ID3v2 header counts as MP3 unless FLAC follows it). Fills what the file carries; a truncated
 /// file yields what was readable before the cut.
+///
+/// # Errors
+///
+/// Returns the I/O error when the reader fails; a malformed or truncated file is not an error.
 pub fn read_from<R: Read + Seek>(reader: &mut R) -> io::Result<Tags> {
     let mut tags = Tags::default();
     match fill(reader, &mut tags) {
@@ -195,7 +203,7 @@ fn leading_number(s: &str) -> Option<u32> {
     let digits: String = s
         .trim_start()
         .chars()
-        .take_while(|c| c.is_ascii_digit())
+        .take_while(char::is_ascii_digit)
         .take(9)
         .collect();
     digits.parse().ok()
@@ -450,7 +458,7 @@ fn genre_name(index: usize) -> Option<String> {
     GENRES
         .get(index)
         .filter(|g| !g.is_empty())
-        .map(|g| g.to_string())
+        .map(std::string::ToString::to_string)
 }
 
 /// An ID3v2 `TCON` value: `"(17)"`, `"17"`, `"(17)Rock"` and `"(RX)"` all resolve to a name.
@@ -486,10 +494,10 @@ fn id3_genre(text: &str) -> Option<String> {
 fn syncsafe(b: &[u8]) -> Option<u32> {
     let b = b.get(..4)?;
     Some(
-        ((b[0] as u32 & 0x7F) << 21)
-            | ((b[1] as u32 & 0x7F) << 14)
-            | ((b[2] as u32 & 0x7F) << 7)
-            | (b[3] as u32 & 0x7F),
+        ((u32::from(b[0]) & 0x7F) << 21)
+            | ((u32::from(b[1]) & 0x7F) << 14)
+            | ((u32::from(b[2]) & 0x7F) << 7)
+            | (u32::from(b[3]) & 0x7F),
     )
 }
 
@@ -711,7 +719,7 @@ fn id3_frame(raw_id: &[u8], frame: &[u8], tags: &mut Tags, state: &mut Id3State)
                 }
                 _ => {
                     let ms = leading_number(&text).filter(|&ms| ms > 0);
-                    set(&mut tags.duration_secs, ms.map(|ms| ms as f64 / 1000.0));
+                    set(&mut tags.duration_secs, ms.map(|ms| f64::from(ms) / 1000.0));
                 }
             }
         }
@@ -758,7 +766,7 @@ fn id3_frame(raw_id: &[u8], frame: &[u8], tags: &mut Tags, state: &mut Id3State)
             offer_picture(
                 tags,
                 &mut state.picture_kind,
-                kind as u32,
+                u32::from(kind),
                 picture(&mime, data),
             );
         }
@@ -776,7 +784,7 @@ fn parse_id3v1(tag: &[u8], tags: &mut Tags) {
     set_text(&mut tags.album, &latin1(&tag[63..93]));
     set(&mut tags.year, leading_year(&latin1(&tag[93..97])));
     let comment = if tag[125] == 0 && tag[126] != 0 {
-        set(&mut tags.track, Some(tag[126] as u32));
+        set(&mut tags.track, Some(u32::from(tag[126])));
         &tag[97..125]
     } else {
         &tag[97..127]
@@ -969,19 +977,16 @@ fn parse_mp3<R: Read + Seek>(r: &mut R, len: u64, tags: &mut Tags) -> io::Result
     }
     let vbr_secs = frames
         .filter(|&f| f > 0)
-        .map(|f| f as f64 * frame.samples_per_frame as f64 / frame.sample_rate as f64);
+        .map(|f| f64::from(f) * f64::from(frame.samples_per_frame) / f64::from(frame.sample_rate));
     if let Some(secs) = vbr_secs {
         tags.duration_secs = Some(secs);
-        let stream_bytes = bytes
-            .filter(|&b| b > 0)
-            .map(|b| b as u64)
-            .unwrap_or(audio_bytes);
+        let stream_bytes = bytes.filter(|&b| b > 0).map_or(audio_bytes, u64::from);
         tags.bitrate_kbps = Some((stream_bytes as f64 * 8.0 / secs / 1000.0).round() as u32);
     } else {
         tags.bitrate_kbps = Some(frame.bitrate_kbps);
         if tags.duration_secs.is_none() && frame.bitrate_kbps > 0 {
             tags.duration_secs =
-                Some(audio_bytes as f64 * 8.0 / (frame.bitrate_kbps as f64 * 1000.0));
+                Some(audio_bytes as f64 * 8.0 / (f64::from(frame.bitrate_kbps) * 1000.0));
         }
     }
     Ok(())
@@ -1038,7 +1043,7 @@ fn mp4_walk<R: Read + Seek>(
                     None => break,
                 }
             }
-            s => s as u64,
+            s => u64::from(s),
         };
         if size < header_len {
             break;
@@ -1070,15 +1075,15 @@ fn mp4_walk<R: Read + Seek>(
                 } else {
                     (
                         be32(&body[12.min(body.len())..]),
-                        be32(&body[16.min(body.len())..]).map(|d| d as u64),
+                        be32(&body[16.min(body.len())..]).map(u64::from),
                     )
                 };
                 if let (Some(ts), Some(d)) = (timescale, duration)
                     && ts > 0
-                    && d != u32::MAX as u64
+                    && d != u64::from(u32::MAX)
                     && d != u64::MAX
                 {
-                    tags.duration_secs = Some(d as f64 / ts as f64);
+                    tags.duration_secs = Some(d as f64 / f64::from(ts));
                 }
             }
             b"stsd" => {
@@ -1109,7 +1114,7 @@ fn mp4_stsd(body: &[u8], tags: &mut Tags, state: &mut Mp4State) {
     let Some(format) = entry.get(4..8) else {
         return;
     };
-    if !format.iter().all(|c| c.is_ascii_graphic()) {
+    if !format.iter().all(u8::is_ascii_graphic) {
         return;
     }
     let mut channels = be16(&entry[24.min(entry.len())..])
@@ -1118,10 +1123,7 @@ fn mp4_stsd(body: &[u8], tags: &mut Tags, state: &mut Mp4State) {
     let mut rate = be32(&entry[32.min(entry.len())..])
         .map(|r| r >> 16)
         .filter(|&r| r > 0);
-    let entry_len = be32(entry)
-        .map(|n| n as usize)
-        .unwrap_or(0)
-        .min(entry.len());
+    let entry_len = be32(entry).map_or(0, |n| n as usize).min(entry.len());
     let mut pos = 36usize;
     while pos + 8 <= entry_len {
         let Some(size) = be32(&entry[pos..])
@@ -1147,7 +1149,7 @@ fn mp4_stsd(body: &[u8], tags: &mut Tags, state: &mut Mp4State) {
 }
 
 /// Walks the MPEG-4 descriptors of an `esds` body (after version/flags) to the
-/// AudioSpecificConfig: `(channels, sample rate)` where the config states them, and the
+/// `AudioSpecificConfig`: `(channels, sample rate)` where the config states them, and the
 /// declared average bitrate into `state`.
 fn mp4_esds(b: &[u8], state: &mut Mp4State) -> (Option<u8>, Option<u32>) {
     let mut pos = 0usize;
@@ -1186,7 +1188,7 @@ fn mp4_esds(b: &[u8], state: &mut Mp4State) -> (Option<u8>, Option<u32>) {
                 // DecoderConfigDescriptor: object type (1), stream type (1), buffer size (3),
                 // max bitrate (4), average bitrate (4), then the DecoderSpecificInfo.
                 if let Some(avg) = be32(&b[(pos + 9).min(b.len())..]).filter(|&a| a > 0) {
-                    state.declared_bitrate = Some((avg as f64 / 1000.0).round() as u32);
+                    state.declared_bitrate = Some((f64::from(avg) / 1000.0).round() as u32);
                 }
                 pos += 13;
             }
@@ -1241,7 +1243,7 @@ fn mp4_ilst<R: Read + Seek>(
     let mut pos = start;
     while pos + 8 <= end {
         let header = read_at(r, pos, 8)?;
-        let Some(size) = be32(&header).map(|s| s as u64) else {
+        let Some(size) = be32(&header).map(u64::from) else {
             break;
         };
         if size < 8 || pos.saturating_add(size) > end {
@@ -1258,6 +1260,10 @@ fn mp4_ilst<R: Read + Seek>(
     Ok(())
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "callers pass four-character codes as byte-string literals, which are references"
+)]
 fn mp4_ilst_item(name: &[u8; 4], body: &[u8], tags: &mut Tags, state: &mut Mp4State) {
     // The first `data` atom of the item.
     let mut pos = 0usize;
@@ -1278,6 +1284,10 @@ fn mp4_ilst_item(name: &[u8; 4], body: &[u8], tags: &mut Tags, state: &mut Mp4St
     }
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "callers pass four-character codes as byte-string literals, which are references"
+)]
 fn mp4_data(name: &[u8; 4], kind: u32, payload: &[u8], tags: &mut Tags, state: &mut Mp4State) {
     let text = || -> Option<String> {
         if kind == 1 && payload.len() <= TEXT_CAP {
@@ -1301,10 +1311,10 @@ fn mp4_data(name: &[u8; 4], kind: u32, payload: &[u8], tags: &mut Tags, state: &
         b"trkn" | b"disk" => {
             let number = be16(&payload[2.min(payload.len())..])
                 .filter(|&n| n > 0)
-                .map(|n| n as u32);
+                .map(u32::from);
             let total = be16(&payload[4.min(payload.len())..])
                 .filter(|&n| n > 0)
-                .map(|n| n as u32);
+                .map(u32::from);
             if name == b"trkn" {
                 set(&mut tags.track, number);
                 set(&mut tags.track_total, total);
@@ -1385,7 +1395,7 @@ fn flac_streaminfo(body: &[u8], tags: &mut Tags) {
         tags.sample_rate = Some(sample_rate);
         tags.channels = Some(channels);
         if total_samples > 0 {
-            tags.duration_secs = Some(total_samples as f64 / sample_rate as f64);
+            tags.duration_secs = Some(total_samples as f64 / f64::from(sample_rate));
         }
     }
 }
@@ -1455,7 +1465,7 @@ fn vorbis_field(key: &[u8], value: &str, tags: &mut Tags) {
         b"ARTIST" => set_text(&mut tags.artist, value),
         b"ALBUM" => set_text(&mut tags.album, value),
         b"ALBUMARTIST" | b"ALBUM ARTIST" | b"ALBUM_ARTIST" => {
-            set_text(&mut tags.album_artist, value)
+            set_text(&mut tags.album_artist, value);
         }
         b"GENRE" => set_text(&mut tags.genre, value),
         b"DATE" | b"YEAR" => set(&mut tags.year, leading_year(value)),
@@ -1493,7 +1503,7 @@ fn base64_decode(s: &[u8]) -> Option<Vec<u8>> {
             b'\n' | b'\r' | b' ' | b'\t' => continue,
             _ => return None,
         };
-        acc = (acc << 6) | v as u32;
+        acc = (acc << 6) | u32::from(v);
         bits += 6;
         if bits >= 8 {
             bits -= 8;
@@ -1571,11 +1581,11 @@ fn finish_ogg<R: Read + Seek>(
         nominal_bitrate = le32(&body[13.min(body.len())..])
             .map(|b| b as i32)
             .filter(|&b| b > 0);
-        rate.unwrap_or(0) as f64
+        f64::from(rate.unwrap_or(0))
     } else if let Some(body) = first.strip_prefix(b"OpusHead") {
         tags.format = Format::Opus;
         tags.channels = body.get(1).copied().filter(|&c| c > 0);
-        pre_skip = le16(&body[2.min(body.len())..]).unwrap_or(0) as u64;
+        pre_skip = u64::from(le16(&body[2.min(body.len())..]).unwrap_or(0));
         let input_rate = le32(&body[4.min(body.len())..]).filter(|&r| r > 0);
         tags.sample_rate = Some(input_rate.unwrap_or(48000));
         48000.0
@@ -1617,7 +1627,7 @@ fn finish_ogg<R: Read + Seek>(
         if secs > 0.0 {
             tags.duration_secs = Some(secs);
             let bitrate = match nominal_bitrate {
-                Some(b) => (b as f64 / 1000.0).round() as u32,
+                Some(b) => (f64::from(b) / 1000.0).round() as u32,
                 None => (len as f64 * 8.0 / secs / 1000.0).round() as u32,
             };
             tags.bitrate_kbps = Some(bitrate);
@@ -1637,7 +1647,7 @@ fn parse_wav<R: Read + Seek>(r: &mut R, len: u64, tags: &mut Tags) -> io::Result
     let mut pos = 12u64;
     while pos + 8 <= len {
         let header = read_at(r, pos, 8)?;
-        let Some(size) = le32(&header[4.min(header.len())..]).map(|s| s as u64) else {
+        let Some(size) = le32(&header[4.min(header.len())..]).map(u64::from) else {
             break;
         };
         let body = pos + 8;
@@ -1647,7 +1657,7 @@ fn parse_wav<R: Read + Seek>(r: &mut R, len: u64, tags: &mut Tags) -> io::Result
                 // format tag (2), channels (2), sample rate (4), byte rate (4), block align, bits.
                 let channels = le16(&fmt[2.min(fmt.len())..]).filter(|&c| c > 0);
                 let sample_rate = le32(&fmt[4.min(fmt.len())..]).filter(|&r| r > 0);
-                byte_rate = le32(&fmt[8.min(fmt.len())..]).unwrap_or(0) as u64;
+                byte_rate = u64::from(le32(&fmt[8.min(fmt.len())..]).unwrap_or(0));
                 set(&mut tags.channels, channels.map(|c| c.min(255) as u8));
                 set(&mut tags.sample_rate, sample_rate);
                 if byte_rate > 0 {
@@ -1655,7 +1665,7 @@ fn parse_wav<R: Read + Seek>(r: &mut R, len: u64, tags: &mut Tags) -> io::Result
                 }
             }
             b"data" => {
-                data_bytes = if size == 0 || size == u32::MAX as u64 {
+                data_bytes = if size == 0 || size == u64::from(u32::MAX) {
                     len.saturating_sub(body)
                 } else {
                     size
@@ -1718,7 +1728,7 @@ fn riff_info(list: &[u8], tags: &mut Tags) {
 fn extended80(b: &[u8]) -> Option<f64> {
     let se = be16(b)?;
     let mantissa = be64(&b[2..])?;
-    let exponent = (se & 0x7FFF) as i32;
+    let exponent = i32::from(se & 0x7FFF);
     if exponent == 0 && mantissa == 0 {
         return Some(0.0);
     }
@@ -1734,7 +1744,7 @@ fn parse_aiff<R: Read + Seek>(r: &mut R, len: u64, tags: &mut Tags) -> io::Resul
     let mut pos = 12u64;
     while pos + 8 <= len {
         let header = read_at(r, pos, 8)?;
-        let Some(size) = be32(&header[4.min(header.len())..]).map(|s| s as u64) else {
+        let Some(size) = be32(&header[4.min(header.len())..]).map(u64::from) else {
             break;
         };
         let body = pos + 8;
@@ -1750,13 +1760,13 @@ fn parse_aiff<R: Read + Seek>(r: &mut R, len: u64, tags: &mut Tags) -> io::Resul
                 if let Some(rate) = rate {
                     tags.sample_rate = Some(rate.round() as u32);
                     if frames > 0 {
-                        tags.duration_secs = Some(frames as f64 / rate);
+                        tags.duration_secs = Some(f64::from(frames) / rate);
                     }
                     if let Some(c) = channels
                         && bits > 0
                     {
                         tags.bitrate_kbps =
-                            Some((rate * c as f64 * bits as f64 / 1000.0).round() as u32);
+                            Some((rate * f64::from(c) * f64::from(bits) / 1000.0).round() as u32);
                     }
                 }
             }
@@ -1809,6 +1819,10 @@ mod tests {
         out.extend_from_slice(body);
         out
     }
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "callers pass frame ids as byte-string literals, which are references"
+    )]
     fn frame_v23(id: &[u8; 4], payload: &[u8]) -> Vec<u8> {
         let mut out = id.to_vec();
         out.extend(be(payload.len() as u32));
@@ -1816,6 +1830,10 @@ mod tests {
         out.extend_from_slice(payload);
         out
     }
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "callers pass frame ids as byte-string literals, which are references"
+    )]
     fn frame_v24(id: &[u8; 4], flags: u8, payload: &[u8]) -> Vec<u8> {
         let mut out = id.to_vec();
         out.extend(syncsafe_bytes(payload.len() as u32));
@@ -1823,6 +1841,10 @@ mod tests {
         out.extend_from_slice(payload);
         out
     }
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "callers pass frame ids as byte-string literals, which are references"
+    )]
     fn frame_v22(id: &[u8; 3], payload: &[u8]) -> Vec<u8> {
         let mut out = id.to_vec();
         out.extend(&be(payload.len() as u32)[1..]);
@@ -1892,12 +1914,20 @@ mod tests {
         out
     }
 
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "callers pass atom names as byte-string literals, which are references"
+    )]
     fn atom(name: &[u8; 4], body: &[u8]) -> Vec<u8> {
         let mut out = be((body.len() + 8) as u32).to_vec();
         out.extend_from_slice(name);
         out.extend_from_slice(body);
         out
     }
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "callers pass atom names as byte-string literals, which are references"
+    )]
     fn atom64(name: &[u8; 4], body: &[u8]) -> Vec<u8> {
         let mut out = be(1).to_vec();
         out.extend_from_slice(name);
@@ -1911,6 +1941,10 @@ mod tests {
         body.extend_from_slice(payload);
         atom(b"data", &body)
     }
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "callers pass atom names as byte-string literals, which are references"
+    )]
     fn ilst_text(name: &[u8; 4], text: &str) -> Vec<u8> {
         atom(name, &data_atom(1, text.as_bytes()))
     }
@@ -2012,9 +2046,9 @@ mod tests {
     }
     fn streaminfo(sample_rate: u32, channels: u8, bits: u8, total_samples: u64) -> Vec<u8> {
         let mut out = vec![0x10, 0x00, 0x10, 0x00, 0, 0, 0, 0, 0, 0];
-        let packed: u64 = ((sample_rate as u64) << 44)
-            | (((channels - 1) as u64) << 41)
-            | (((bits - 1) as u64) << 36)
+        let packed: u64 = (u64::from(sample_rate) << 44)
+            | (u64::from(channels - 1) << 41)
+            | (u64::from(bits - 1) << 36)
             | (total_samples & 0xF_FFFF_FFFF);
         out.extend(packed.to_be_bytes());
         out.extend([0; 16]);
@@ -2112,7 +2146,7 @@ mod tests {
         for chunk in data.chunks(3) {
             let mut n = 0u32;
             for (i, &b) in chunk.iter().enumerate() {
-                n |= (b as u32) << (16 - 8 * i);
+                n |= u32::from(b) << (16 - 8 * i);
             }
             for i in 0..4 {
                 if i <= chunk.len() {
@@ -2147,6 +2181,10 @@ mod tests {
         out
     }
 
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "callers pass chunk ids as byte-string literals, which are references"
+    )]
     fn riff_chunk(id: &[u8; 4], body: &[u8]) -> Vec<u8> {
         let mut out = id.to_vec();
         out.extend(le(body.len() as u32));
@@ -2194,6 +2232,14 @@ mod tests {
         comm.extend(be(44100)); // frames
         comm.extend(16u16.to_be_bytes());
         comm.extend([0x40, 0x0E, 0xAC, 0x44, 0, 0, 0, 0, 0, 0]); // 44100.0
+        #[expect(
+            clippy::trivially_copy_pass_by_ref,
+            reason = "callers pass chunk ids as byte-string literals, which are references"
+        )]
+        #[expect(
+            clippy::items_after_statements,
+            reason = "the helper sits beside the fixture bytes it frames"
+        )]
         fn chunk(id: &[u8; 4], body: &[u8]) -> Vec<u8> {
             let mut out = id.to_vec();
             out.extend(be(body.len() as u32));
@@ -2298,10 +2344,10 @@ mod tests {
         body.extend(frame_v24(b"TCON", 0, &text_utf8("17")));
         // UTF-16 with a BOM and UTF-16BE without.
         let mut utf16le = vec![1u8, 0xFF, 0xFE];
-        utf16le.extend("Albüm".encode_utf16().flat_map(|u| u.to_le_bytes()));
+        utf16le.extend("Albüm".encode_utf16().flat_map(u16::to_le_bytes));
         body.extend(frame_v24(b"TALB", 0, &utf16le));
         let mut utf16be = vec![2u8];
-        utf16be.extend("Bänd".encode_utf16().flat_map(|u| u.to_be_bytes()));
+        utf16be.extend("Bänd".encode_utf16().flat_map(u16::to_be_bytes));
         body.extend(frame_v24(b"TPE2", 0, &utf16be));
         // An unsynchronised APIC with a data length indicator.
         let raw = apic(
@@ -2805,7 +2851,7 @@ mod tests {
         // One second of a 440 Hz sine, 16-bit mono at 44.1 kHz.
         let samples: Vec<u8> = (0..44_100)
             .flat_map(|i| {
-                let v = (i as f64 / 44_100.0 * 440.0 * std::f64::consts::TAU).sin() * 12_000.0;
+                let v = (f64::from(i) / 44_100.0 * 440.0 * std::f64::consts::TAU).sin() * 12_000.0;
                 (v as i16).to_le_bytes()
             })
             .collect();

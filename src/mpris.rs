@@ -16,6 +16,7 @@
 //!
 //! Without a session bus the first publish logs once at debug level and the rest are dropped.
 
+use std::fmt::Write as _;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, mpsc};
 use std::time::Instant;
 
@@ -192,7 +193,9 @@ impl State {
 }
 
 fn lock(state: &Mutex<State>) -> MutexGuard<'_, State> {
-    state.lock().unwrap_or_else(|e| e.into_inner())
+    state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn env(key: &str) -> Option<String> {
@@ -286,9 +289,10 @@ fn file_url(path: &str) -> String {
     let absolute = if path.starts_with('/') {
         path.to_owned()
     } else {
-        std::env::current_dir()
-            .map(|d| d.join(path).to_string_lossy().into_owned())
-            .unwrap_or_else(|_| format!("/{path}"))
+        std::env::current_dir().map_or_else(
+            |_| format!("/{path}"),
+            |d| d.join(path).to_string_lossy().into_owned(),
+        )
     };
     let mut url = String::from("file://");
     for b in absolute.bytes() {
@@ -296,7 +300,9 @@ fn file_url(path: &str) -> String {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
                 url.push(char::from(b));
             }
-            _ => url.push_str(&format!("%{b:02X}")),
+            _ => {
+                let _ = write!(url, "%{b:02X}");
+            }
         }
     }
     url
@@ -509,7 +515,6 @@ fn handle(state: &Mutex<State>, call: &MethodCall) -> Result<Vec<Value>, MethodE
         // Raise needs a window to bring up and Quit a way out; the piece has neither (CanQuit
         // and CanRaise say so), and a well-behaved client never calls them.
         (Some(ROOT_INTERFACE), "Raise" | "Quit") => Ok(Vec::new()),
-        (Some(ROOT_INTERFACE), _) => Err(MethodError::unknown_method(call)),
         (Some(PLAYER_INTERFACE) | None, _) => player_method(state, call),
         (Some(_), _) => Err(MethodError::unknown_method(call)),
     }
@@ -523,7 +528,7 @@ fn own_name(conn: &Connection) -> Option<String> {
     for name in [base, instance] {
         match conn.request_name(&name, NAME_FLAG_DO_NOT_QUEUE) {
             Ok(NAME_REPLY_PRIMARY_OWNER | NAME_REPLY_ALREADY_OWNER) => return Some(name),
-            Ok(NAME_REPLY_EXISTS) => continue,
+            Ok(NAME_REPLY_EXISTS) => {}
             Ok(code) => {
                 log::debug!("media: MPRIS name {name} not owned (RequestName answered {code})");
                 return None;
@@ -582,6 +587,10 @@ fn apply(conn: &Connection, state: &Mutex<State>, node: NodeId, info: Option<Now
 
 /// The service thread: connect, export, own the name, then relay every publish until the
 /// channel closes or the bus goes away.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the service thread owns its receiver"
+)]
 fn serve(rx: mpsc::Receiver<Update>) {
     let conn = match Connection::session() {
         Ok(c) => c,
@@ -692,7 +701,9 @@ mod tests {
     fn position_runs_on_while_playing() {
         let mut s = State::new();
         s.info = Some(song());
-        s.at = Instant::now() - std::time::Duration::from_secs(2);
+        s.at = Instant::now()
+            .checked_sub(std::time::Duration::from_secs(2))
+            .expect("the clock is at least two seconds past its origin");
         let p = s.position();
         assert!((11.9..12.5).contains(&p), "{p}");
         s.info.as_mut().unwrap().playing = false;

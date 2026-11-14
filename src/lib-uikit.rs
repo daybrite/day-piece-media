@@ -179,6 +179,7 @@ impl MediaObserver {
 
     /// Starts the player at the chosen rate. Without `defaultRate`, `play` would start at 1, so
     /// iOS 15 sets the rate itself, which plays just as `play` does.
+    #[expect(clippy::float_cmp, reason = "a rate of exactly 1 is the player's default rate")]
     fn play(&self) {
         let player = &self.ivars().player;
         let rate = self.ivars().rate.get();
@@ -285,7 +286,7 @@ impl MediaObserver {
             self.ivars().node,
             Event::Custom {
                 tag: report::TAG,
-                num: code as f64,
+                num: f64::from(code),
                 text,
             },
         );
@@ -326,7 +327,7 @@ define_class!(
                     self.ivars().node,
                     Event::Custom {
                         tag: report::TAG,
-                        num: report::METADATA as f64,
+                        num: f64::from(report::METADATA),
                         text,
                     },
                 );
@@ -358,13 +359,13 @@ fn metadata_text(groups: &NSArray<AVTimedMetadataGroup>) -> Option<String> {
 
 /// The same, for one batch of items (a group's, or the item's `timedMetadata`).
 fn items_text(items: &NSArray<objc2_av_foundation::AVMetadataItem>) -> Option<String> {
-    let ident = |s: Option<&'static objc2_foundation::NSString>| s.map(|s| s.to_string());
+    let ident = |s: Option<&'static objc2_foundation::NSString>| s.map(std::string::ToString::to_string);
     let icy = unsafe { ident(AVMetadataIdentifierIcyMetadataStreamTitle) };
     let title_id = unsafe { ident(AVMetadataCommonIdentifierTitle) };
     let artist_id = unsafe { ident(AVMetadataCommonIdentifierArtist) };
     let album_id = unsafe { ident(AVMetadataCommonIdentifierAlbumName) };
     let (mut title, mut artist, mut album) = (String::new(), String::new(), String::new());
-    for item in items.iter() {
+    for item in items {
         let id = unsafe { item.identifier() }.map(|i| i.to_string());
         let Some(value) = (unsafe { item.stringValue() }).map(|v| v.to_string()) else {
             continue;
@@ -424,9 +425,7 @@ fn state_of(player: &AVPlayer) -> (i32, String) {
         return (report::IDLE, String::new());
     };
     if unsafe { item.status() } == AVPlayerItemStatus::Failed {
-        let text = unsafe { item.error() }
-            .map(|e| e.localizedDescription().to_string())
-            .unwrap_or_else(|| "playback failed".into());
+        let text = unsafe { item.error() }.map_or_else(|| "playback failed".into(), |e| e.localizedDescription().to_string());
         return (report::ERROR, text);
     }
     // AVPlayer sends a final paused KVO notification as well as the end notification.
@@ -650,7 +649,7 @@ fn add_handler(command: &MPRemoteCommand, text: impl Fn(&AnyObject) -> String + 
         // The block runs inside a C ABI frame, so its body is contained like every other
         // trampoline in this arm.
         ffi_guard::contain(HANDLER_NO_ITEM, || {
-            let Some(node) = REMOTE_NODE.with(|n| n.get()) else {
+            let Some(node) = REMOTE_NODE.with(std::cell::Cell::get) else {
                 return HANDLER_NO_ITEM;
             };
             // SAFETY: the command center hands a live event for the call's duration.
@@ -660,7 +659,7 @@ fn add_handler(command: &MPRemoteCommand, text: impl Fn(&AnyObject) -> String + 
                 node,
                 Event::Custom {
                     tag: report::TAG,
-                    num: report::REMOTE as f64,
+                    num: f64::from(report::REMOTE),
                     text,
                 },
             );
@@ -724,7 +723,7 @@ day_core::tls_group! {
 }
 
 fn key_of(h: &UIView) -> usize {
-    (h as *const UIView) as usize
+    std::ptr::from_ref::<UIView>(h) as usize
 }
 
 /// `NSURL` from the one source string: an explicit scheme parses as a URL, anything else is a
@@ -901,7 +900,7 @@ fn timeline_of(observer: &MediaObserver) -> MediaTimeline {
     let player = &observer.ivars().player;
     let mut value = MediaTimeline::default();
     unsafe {
-        value.rate = observer.ivars().rate.get() as f64;
+        value.rate = f64::from(observer.ivars().rate.get());
         value.capabilities.volume = true;
         let Some(item) = player.currentItem() else {
             return value;

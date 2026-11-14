@@ -68,6 +68,7 @@ fn make(backend: &mut Dom, p: &MediaProps, _id: NodeId) -> DomHandle {
     h
 }
 
+#[expect(clippy::trivially_copy_pass_by_ref, reason = "the renderer table fixes this signature")]
 fn update(backend: &mut Dom, h: &DomHandle, patch: &MediaPatch) {
     match patch {
         MediaPatch::Load(url) => {
@@ -102,6 +103,7 @@ fn update(backend: &mut Dom, h: &DomHandle, patch: &MediaPatch) {
 /// A growing leaf: take whatever the layout proposes, with a modest default when it proposes
 /// nothing (the same posture as the other arms, which report the native view's intrinsic size).
 /// A sound-only element is `display:none` and takes no room.
+#[expect(clippy::trivially_copy_pass_by_ref, reason = "the renderer table fixes this signature")]
 fn measure(_backend: &mut Dom, h: &DomHandle, p: Proposal) -> Size {
     if AUDIO_ONLY.with(|s| s.borrow().contains(&h.0)) {
         return Size::ZERO;
@@ -115,6 +117,7 @@ day_pieces::dom_renderer!(day_toolkit_dom::register_renderer, Dom,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);
 
+#[expect(clippy::trivially_copy_pass_by_ref, reason = "the renderer table fixes this signature")]
 fn release(_backend: &mut Dom, h: &DomHandle) {
     AUDIO_ONLY.with(|s| s.borrow_mut().remove(&h.0));
 }

@@ -32,11 +32,11 @@ fn make(_backend: &mut ArkUi, p: &MediaProps, id: NodeId) -> AHandle {
     let props = format!(
         "{}{SEP}{}{SEP}{}{SEP}{}{SEP}{}{SEP}{}{SEP}{:.3}",
         p.url,
-        p.autoplay as u8,
-        p.looping as u8,
-        p.muted as u8,
-        p.controls as u8,
-        p.audio_only as u8,
+        u8::from(p.autoplay),
+        u8::from(p.looping),
+        u8::from(p.muted),
+        u8::from(p.controls),
+        u8::from(p.audio_only),
         p.volume.clamp(0.0, 1.0)
     );
     let h = piece::make(KIND, id, &props);
@@ -46,6 +46,7 @@ fn make(_backend: &mut ArkUi, p: &MediaProps, id: NodeId) -> AHandle {
     h
 }
 
+#[expect(clippy::trivially_copy_pass_by_ref, reason = "the renderer table fixes this signature")]
 fn update(_backend: &mut ArkUi, h: &AHandle, patch: &MediaPatch) {
     let volume;
     let now_playing;

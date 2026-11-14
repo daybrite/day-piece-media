@@ -93,7 +93,7 @@ fn measure(backend: &mut Material, h: &AHandle, proposal: Proposal) -> Size {
     day_pieces::fill_measure(backend, h, proposal)
 }
 
-/// Release the MediaPlayer a sound-only view carries; a VideoView releases its own.
+/// Release the `MediaPlayer` a sound-only view carries; a `VideoView` releases its own.
 fn release(_backend: &mut Material, h: &AHandle) {
     release_player(h);
 }
@@ -105,7 +105,7 @@ day_pieces::renderer!(day_toolkit_material::RENDERERS, Material,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);
 
-/// Application-context player retained directly by AudioSession, outside Day's activity tree.
+/// Application-context player retained directly by `AudioSession`, outside Day's activity tree.
 /// Node zero selects a private report queue instead of the UI event router.
 pub(crate) struct SessionPlayer(AHandle);
 impl SessionPlayer {

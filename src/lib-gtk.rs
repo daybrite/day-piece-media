@@ -51,7 +51,7 @@ fn report(id: NodeId, code: i32, text: String) {
         id,
         Event::Custom {
             tag: report::TAG,
-            num: code as f64,
+            num: f64::from(code),
             text,
         },
     );
@@ -180,6 +180,10 @@ fn make(_backend: &mut Gtk, p: &MediaProps, id: NodeId) -> gtk4::Widget {
     widget
 }
 
+#[expect(
+    clippy::float_cmp,
+    reason = "a rate of exactly 1 is the only one this backend plays"
+)]
 fn update(_backend: &mut Gtk, h: &gtk4::Widget, patch: &MediaPatch) {
     match patch {
         MediaPatch::Background(_) => {}
@@ -306,7 +310,7 @@ fn measure(backend: &mut Gtk, h: &gtk4::Widget, proposal: Proposal) -> Size {
     day_pieces::fill_measure(backend, h, proposal)
 }
 
-/// Silence the stream when the widget goes: a detached GtkMediaStream keeps playing.
+/// Silence the stream when the widget goes: a detached `GtkMediaStream` keeps playing.
 fn release(_backend: &mut Gtk, h: &gtk4::Widget) {
     if let Some(stream) = stream_of(h) {
         stream.pause();
@@ -354,7 +358,7 @@ mod diagnose {
         unsafe { stream.set_data(CHECKED_KEY, true) };
         let Some(uri) = stream
             .downcast_ref::<gtk4::MediaFile>()
-            .and_then(|m| m.file())
+            .and_then(gtk4::prelude::MediaFileExt::file)
             .map(|f| f.uri().to_string())
         else {
             return;

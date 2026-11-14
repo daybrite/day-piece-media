@@ -3,7 +3,7 @@
 
 //! Compiles this piece's native shim per feature: a standalone Day Piece carrying native C++
 //! without touching Day's toolkit crates (like day-piece-webview). Qt uses `cc` + pkg-config and
-//! (unlike day-toolkit-qt-sys) links Qt6MultimediaWidgets when the host ships it. XAML uses `cc` (MSVC) +
+//! (unlike day-toolkit-qt-sys) links `Qt6MultimediaWidgets` when the host ships it. XAML uses `cc` (MSVC) +
 //! the Windows SDK cppwinrt projection, mirroring day-toolkit-xaml-sys / the webview's XAML shim.
 
 fn main() {
@@ -87,14 +87,13 @@ fn build_qt() {
     }
 }
 
-/// True if pkg-config knows the module (used to pick the real QMediaPlayer shim vs. the label
+/// True if pkg-config knows the module (used to pick the real `QMediaPlayer` shim vs. the label
 /// fallback). `--exists` is the standard availability probe; a missing pkg-config counts as absent.
 fn pkg_config_exists(pkg: &str) -> bool {
     std::process::Command::new("pkg-config")
         .args(["--exists", pkg])
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+        .is_ok_and(|s| s.success())
 }
 
 fn pkg_config(args: &[&str]) -> String {
@@ -102,12 +101,11 @@ fn pkg_config(args: &[&str]) -> String {
         .args(args)
         .output()
         .unwrap_or_else(|e| panic!("pkg-config {args:?}: {e}"));
-    if !out.status.success() {
-        panic!(
-            "pkg-config {args:?} failed — is Qt6MultimediaWidgets installed?\n{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
+    assert!(
+        out.status.success(),
+        "pkg-config {args:?} failed — is Qt6MultimediaWidgets installed?\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
