@@ -131,7 +131,7 @@ fn now_playing(h: QtHandle, info: Option<&NowPlayingInfo>) {
                     num: f64::from(report::REMOTE),
                     text,
                 },
-            )
+            );
         });
         crate::mpris::publish(id, info.cloned());
     }
