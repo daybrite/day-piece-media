@@ -370,8 +370,7 @@ mod android_observation {
                 .node
                 .borrow()
                 .as_ref()
-                .map(|node| node.player.reports())
-                .unwrap_or_default();
+                .map_or_default(|node| node.player.reports());
             let mut snapshot = inner.snapshot.get_untracked();
             for (code, text) in reports {
                 match code {

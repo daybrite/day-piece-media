@@ -68,8 +68,7 @@ fn command(h: &AHandle, patch: &MediaPatch) {
         MediaPatch::NowPlaying(value) => {
             now_playing = value
                 .as_ref()
-                .map(|v| serde_json::to_string(v).unwrap_or_default())
-                .unwrap_or_default();
+                .map_or_default(|v| serde_json::to_string(v).unwrap_or_default());
             (9, now_playing.as_str(), 0.0)
         }
         MediaPatch::Poll => (7, "", 0.0),

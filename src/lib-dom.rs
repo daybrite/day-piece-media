@@ -84,8 +84,7 @@ fn update(backend: &mut Dom, h: &DomHandle, patch: &MediaPatch) {
         MediaPatch::NowPlaying(value) => {
             let json = value
                 .as_ref()
-                .map(|v| serde_json::to_string(v).unwrap_or_default())
-                .unwrap_or_default();
+                .map_or_default(|v| serde_json::to_string(v).unwrap_or_default());
             super::browser::now_playing(h.0 as i32, &json);
         }
         MediaPatch::Poll => super::browser::poll(h.0 as i32),
