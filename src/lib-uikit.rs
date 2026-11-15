@@ -872,7 +872,7 @@ fn measure(backend: &mut Uikit, h: &Retained<UIView>, proposal: Proposal) -> Siz
     if LIVE.with(|m| m.borrow().get(&key_of(h)).is_some_and(|l| l.audio_only)) {
         return Size::ZERO;
     }
-    day_pieces::fill_measure(backend, h, proposal)
+    day_spec::fill_measure(backend, h, proposal)
 }
 
 /// Stop playback and drop the retained player, controller, and observer when the view goes
@@ -892,7 +892,7 @@ fn release(_backend: &mut Uikit, h: &Retained<UIView>) {
     drop(live.controller);
 }
 
-day_pieces::renderer!(day_toolkit_uikit::RENDERERS, Uikit,
+day_spec::renderer!(day_toolkit_uikit::RENDERERS, Uikit,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);
 

@@ -89,7 +89,7 @@ fn measure(backend: &mut Material, h: &AHandle, proposal: Proposal) -> Size {
     if audio_only {
         return Size::ZERO;
     }
-    day_pieces::fill_measure(backend, h, proposal)
+    day_spec::fill_measure(backend, h, proposal)
 }
 
 /// Release the `MediaPlayer` a sound-only view carries; a `VideoView` releases its own.
@@ -100,7 +100,7 @@ fn release_player(h: &AHandle) {
     java(|env| DayMedia::releaseMedia(env, h.0.as_obj()));
 }
 
-day_pieces::renderer!(day_toolkit_material::RENDERERS, Material,
+day_spec::renderer!(day_toolkit_material::RENDERERS, Material,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);
 

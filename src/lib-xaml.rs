@@ -164,10 +164,10 @@ fn measure(backend: &mut Xaml, h: &WinHandle, proposal: Proposal) -> Size {
     if unsafe { day_media_xaml_is_audio_only(h.0) } != 0 {
         return Size::ZERO;
     }
-    day_pieces::fill_measure(backend, h, proposal)
+    day_spec::fill_measure(backend, h, proposal)
 }
 
-day_pieces::renderer!(day_toolkit_winui::RENDERERS, Xaml,
+day_spec::renderer!(day_toolkit_winui::RENDERERS, Xaml,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);
 

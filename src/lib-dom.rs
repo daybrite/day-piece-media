@@ -112,7 +112,7 @@ fn measure(_backend: &mut Dom, h: &DomHandle, p: Proposal) -> Size {
 
 // Defines `register()`, which `media()` calls: web-dom's registry is populated at runtime, unlike
 // the link-time `renderer!` the other eight arms use.
-day_pieces::dom_renderer!(day_toolkit_dom::register_renderer, Dom,
+day_spec::dom_renderer!(day_toolkit_dom::register_renderer, Dom,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);
 

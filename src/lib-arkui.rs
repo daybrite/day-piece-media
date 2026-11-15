@@ -84,13 +84,13 @@ fn measure(backend: &mut ArkUi, h: &AHandle, proposal: Proposal) -> Size {
     if AUDIO_ONLY.with(|s| s.borrow().contains(&(h.0 as usize))) {
         return Size::ZERO;
     }
-    day_pieces::fill_measure(backend, h, proposal)
+    day_spec::fill_measure(backend, h, proposal)
 }
 
 fn release(_backend: &mut ArkUi, h: &AHandle) {
     AUDIO_ONLY.with(|s| s.borrow_mut().remove(&(h.0 as usize)));
 }
 
-day_pieces::renderer!(day_toolkit_arkui::RENDERERS, ArkUi,
+day_spec::renderer!(day_toolkit_arkui::RENDERERS, ArkUi,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);

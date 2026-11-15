@@ -307,7 +307,7 @@ fn measure(backend: &mut Gtk, h: &gtk4::Widget, proposal: Proposal) -> Size {
     if unsafe { h.data::<bool>(AUDIO_ONLY_KEY) }.is_some() {
         return Size::ZERO;
     }
-    day_pieces::fill_measure(backend, h, proposal)
+    day_spec::fill_measure(backend, h, proposal)
 }
 
 /// Silence the stream when the widget goes: a detached `GtkMediaStream` keeps playing.
@@ -571,6 +571,6 @@ mod diagnose {
 #[allow(unused_imports)]
 use glib::object::ObjectExt as _;
 
-day_pieces::renderer!(day_toolkit_gtk::RENDERERS, Gtk,
+day_spec::renderer!(day_toolkit_gtk::RENDERERS, Gtk,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);

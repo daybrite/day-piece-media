@@ -766,7 +766,7 @@ fn measure(backend: &mut AppKit, h: &Retained<NSView>, proposal: Proposal) -> Si
     if LIVE.with(|m| m.borrow().get(&key_of(h)).is_some_and(|l| l.audio_only)) {
         return Size::ZERO;
     }
-    day_pieces::fill_measure(backend, h, proposal)
+    day_spec::fill_measure(backend, h, proposal)
 }
 
 /// Stop playback and drop the retained player + observer when the view goes away.
@@ -784,7 +784,7 @@ fn release(_backend: &mut AppKit, h: &Retained<NSView>) {
     live.observer.detach();
 }
 
-day_pieces::renderer!(day_toolkit_appkit::RENDERERS, AppKit,
+day_spec::renderer!(day_toolkit_appkit::RENDERERS, AppKit,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);
 

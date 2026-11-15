@@ -162,7 +162,7 @@ fn measure(backend: &mut Qt, h: &QtHandle, proposal: Proposal) -> Size {
     if unsafe { day_media_is_audio_only(h.0) } != 0 {
         return Size::ZERO;
     }
-    day_pieces::fill_measure(backend, h, proposal)
+    day_spec::fill_measure(backend, h, proposal)
 }
 
 /// Forget the handle's node; day-toolkit-qt frees the widget itself.
@@ -171,6 +171,6 @@ fn release(_backend: &mut Qt, h: &QtHandle) {
     nodes::forget(*h);
 }
 
-day_pieces::renderer!(day_toolkit_qt::RENDERERS, Qt,
+day_spec::renderer!(day_toolkit_qt::RENDERERS, Qt,
     kind: KIND, props: MediaProps, patch: MediaPatch,
     make: make, update: update, measure: measure, release: release);
