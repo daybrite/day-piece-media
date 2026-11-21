@@ -75,6 +75,7 @@ fn update(_backend: &mut ArkUi, h: &AHandle, patch: &MediaPatch) {
             volume = format!("{:.3}", v.clamp(0.0, 1.0));
             ("volume", volume.as_str())
         }
+        MediaPatch::Muted(on) => ("muted", if *on { "1" } else { "0" }),
     };
     piece::update(h, cmd, arg);
 }

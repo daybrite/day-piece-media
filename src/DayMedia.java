@@ -68,7 +68,7 @@ public final class DayMedia {
         final JSONArray sessionReports = new JSONArray();
         final boolean audioOnly;
         final boolean looping;
-        final boolean muted;
+        boolean muted;
         float volume;
         float rate = 1f;
         float appliedRate = 1f;
@@ -674,7 +674,8 @@ public final class DayMedia {
     }
 
     /** Imperative commands: 0=load (and play), 1=play, 2=pause, 3=stop, 4=volume (`value`),
-     *  5=seek, 6=rate, 7=poll, 8=background (JSON in `url`), 9=now playing (JSON in `url`). */
+     *  5=seek, 6=rate, 7=poll, 8=background (JSON in `url`), 9=now playing (JSON in `url`),
+     *  10=muted (`value` 1) or not (0). */
     public static void mediaCommand(View view, int code, String url, double value) {
         Live live = LIVE.get(view);
         if (live == null) {
@@ -689,6 +690,14 @@ public final class DayMedia {
         if (code == 2 || code == 3) { live.resumeAfterFocus = false; live.abandonFocus(); }
         if (code == 1 && live.audioOnly && live.prepared && !live.acquireFocus()) return;
         if (code == 7) { poll(live); return; }
+        if (code == 10) {
+            // MediaPlayer has no mute of its own: a muted player plays at volume zero and keeps
+            // the volume it returns to.
+            live.muted = value != 0;
+            MediaPlayer mp = live.audioOnly ? live.player : live.videoPlayer;
+            if (mp != null && (live.audioOnly || live.prepared)) live.applyVolume(mp);
+            return;
+        }
         if (code == 6) {
             if (!Double.isFinite(value) || value < .25 || value > 4) { live.report(8, "rate:invalid"); return; }
             live.rate = (float) value;

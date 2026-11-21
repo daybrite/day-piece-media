@@ -14,6 +14,13 @@ Use a media piece for playback tied to a screen, or retain an audio session acro
 Observe playback, errors, timeline, and stream metadata; codecs and background behavior depend
 on the platform.
 
+## Changes since 0.4.6
+
+- `Media::muted_while(…)` mutes and unmutes the player from a `Signal<bool>` or a closure.
+- `Media::now_playing(…)` publishes a `Signal<Option<NowPlayingInfo>>` or closure to the
+  system's now-playing surfaces from the view.
+- `MediaPatch` has a new `Muted(bool)` variant; code that matches on `MediaPatch` needs an arm.
+
 ## Use
 
 Add `day-piece-media = "0.*"` to your app’s `[dependencies]`.

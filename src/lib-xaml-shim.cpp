@@ -339,6 +339,13 @@ void day_media_xaml_set_volume(void *handle, double volume) {
     } catch (...) {
     }
 }
+void day_media_xaml_set_muted(void *handle, int muted) {
+    try {
+        if (auto p = player_of(handle))
+            p.IsMuted(muted != 0);
+    } catch (...) {
+    }
+}
 void day_media_xaml_seek(void *handle, double seconds) {
     try {
         if (auto p = player_of(handle)) {

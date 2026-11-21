@@ -15,7 +15,8 @@
 //! it anywhere in its tree and build its own now-playing UI around it. The `url` source accepts a
 //! plain string, a `Signal<String>`, or a closure, and may name a local file path or an
 //! http(s)/file URL; every backend's loader takes both. Configure playback at build with
-//! `.autoplay(bool)` / `.looping(bool)` / `.muted(bool)` / `.controls(bool)`; transport is
+//! `.no_autoplay()` / `.looping()` / `.muted()` / `.no_controls()` (`.muted_while(…)` follows a
+//! signal or a closure); transport is
 //! imperative and modeled with `Copy` `Trigger`s: `.play()` / `.pause()` / `.stop()` drive playback
 //! and `.load()` re-reads the bound url (then plays), each `watch`ed to a `MediaPatch`.
 //! `.volume(…)` is a tracked fraction (a constant, a `Signal<f64>`, or a closure) patched through
@@ -36,9 +37,14 @@
 mod browser;
 
 use day_core::{BuildCx, Flex, Piece, RNode, with_tree};
-use day_pieces::{Decorated, FractionSource, IntoFraction, IntoText, TextSource};
+use day_pieces::{
+    Decorated, FractionSource, IntoFraction, IntoReactive, IntoText, Reactive, TextSource,
+};
 use day_reactive::{AnyBinding, Binding, Trigger, untrack, watch};
 use day_spec::Event;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 mod session;
 pub use session::{AudioSession, BackgroundAudio, PlaybackSnapshot};
@@ -100,6 +106,9 @@ pub enum MediaPatch {
     Stop,
     /// Set the output volume, `0.0..=1.0` (from `.volume(…)` changing).
     Volume(f64),
+    /// Silence the audio track, or let it play again (from `.muted_while(…)` changing). Leaves
+    /// the volume as it is.
+    Muted(bool),
     /// Seek to an absolute position in seconds. Does not change paused/playing intent.
     Seek(f64),
     /// Positive playback speed (0.25–4); unsupported speeds report a command error.
@@ -325,9 +334,11 @@ pub struct Media {
     autoplay: bool,
     looping: bool,
     muted: bool,
+    mute: Option<Rc<dyn Fn() -> bool>>,
     controls: bool,
     audio_only: bool,
     volume: Option<FractionSource>,
+    now_playing: Option<Rc<dyn Fn() -> Option<NowPlayingInfo>>>,
     play: Option<Trigger>,
     pause: Option<Trigger>,
     stop: Option<Trigger>,
@@ -338,7 +349,7 @@ pub struct Media {
     error: Option<AnyBinding<Option<MediaError>>>,
     seek: Option<(AnyBinding<f64>, Trigger)>,
     rate: Option<AnyBinding<f64>>,
-    remote: Option<std::rc::Rc<dyn Fn(RemoteCommand)>>,
+    remote: Option<Rc<dyn Fn(RemoteCommand)>>,
 }
 
 /// `media(url)`: a native audio/video player for `url` (a string, `Signal<String>`, or closure;
@@ -354,9 +365,11 @@ pub fn media<M>(url: impl IntoText<M>) -> Media {
         autoplay: true,
         looping: false,
         muted: false,
+        mute: None,
         controls: true,
         audio_only: false,
         volume: None,
+        now_playing: None,
         play: None,
         pause: None,
         stop: None,
@@ -384,9 +397,24 @@ impl Media {
         self.looping = true;
         self
     }
-    /// Silence the audio track.
+    /// Silence the audio track. Replaces an earlier `.muted_while(…)`.
     pub fn muted(mut self) -> Self {
         self.muted = true;
+        self.mute = None;
+        self
+    }
+    /// Silence the audio track while `muted` reads `true`: a `Signal<bool>` or a closure (a
+    /// constant is [`muted`](Self::muted)). The player starts the way it first reads and follows
+    /// each change, with the volume left as it is, so a mute button needs no rebuild. The last
+    /// of `.muted()` and `.muted_while(…)` wins.
+    pub fn muted_while<M>(mut self, muted: impl IntoReactive<bool, M>) -> Self {
+        match muted.into_reactive() {
+            Reactive::Const(on) => {
+                self.muted = on;
+                self.mute = None;
+            }
+            Reactive::Dyn(f) => self.mute = Some(f),
+        }
         self
     }
     /// Hide the toolkit's native transport chrome (shown by default where the toolkit has one).
@@ -466,11 +494,22 @@ impl Media {
         self.metadata = Some(AnyBinding::new(metadata));
         self
     }
+    /// What the system's now-playing surfaces show for this player (the lock screen, Control
+    /// Center, the media keys' overlay, MPRIS clients): a `Signal<Option<NowPlayingInfo>>` or a
+    /// closure, sent when the player is on screen and again on every change. `None` clears it.
+    /// The view's form of [`AudioSession::now_playing`], for an app that plays through the view.
+    pub fn now_playing<M>(mut self, info: impl IntoReactive<Option<NowPlayingInfo>, M>) -> Self {
+        self.now_playing = Some(match info.into_reactive() {
+            Reactive::Const(info) => Rc::new(move || info.clone()),
+            Reactive::Dyn(f) => f,
+        });
+        self
+    }
     /// Receive the system's transport commands (media keys, lock screen, MPRIS, a headset)
     /// aimed at this player. Nothing happens on its own: the app runs the command through
     /// its own triggers, so its queue and its UI stay in agreement.
     pub fn on_remote(mut self, f: impl Fn(RemoteCommand) + 'static) -> Self {
-        self.remote = Some(std::rc::Rc::new(f));
+        self.remote = Some(Rc::new(f));
         self
     }
 }
@@ -482,9 +521,11 @@ impl Media {
             autoplay,
             looping,
             muted,
+            mute,
             controls,
             audio_only,
             volume,
+            now_playing,
             play,
             pause,
             stop,
@@ -501,7 +542,7 @@ impl Media {
             url: url.initial(),
             autoplay,
             looping,
-            muted,
+            muted: mute.as_ref().map_or(muted, |f| untrack(|| f())),
             controls,
             audio_only,
             volume: volume.as_ref().map_or(1.0, FractionSource::initial),
@@ -582,6 +623,40 @@ impl Media {
                 move || f().clamp(0.0, 1.0),
                 move |v, _| send(MediaPatch::Volume(*v)),
             );
+        }
+        // A tracked mute follows its source the same way.
+        if let Some(f) = mute {
+            watch(move || f(), move |on, _| send(MediaPatch::Muted(*on)));
+        }
+        // What the system shows: every change goes straight through, and the value at the
+        // time the player is first on screen goes on the next turn, once the node has its
+        // native player (a patch to a node not yet realized is dropped).
+        if let Some(f) = now_playing {
+            let id = day_core::rnode_to_id(node);
+            let first = untrack(|| f());
+            let changed = Arc::new(AtomicBool::new(false));
+            let seen = changed.clone();
+            watch(
+                move || f(),
+                move |info, _| {
+                    seen.store(true, Ordering::Release);
+                    send(MediaPatch::NowPlaying(info.clone()));
+                },
+            );
+            if first.is_some() {
+                day_reactive::on_main(move || {
+                    // A change in between already sent the newer value.
+                    if changed.load(Ordering::Acquire) {
+                        return;
+                    }
+                    let _ = day_core::try_with_tree(|tree| {
+                        let node = day_core::id_to_rnode(id);
+                        if tree.node_exists(node) {
+                            tree.patch(node, Box::new(MediaPatch::NowPlaying(first)), false);
+                        }
+                    });
+                });
+            }
         }
         if let Some((seconds, trigger)) = seek {
             watch(
@@ -810,6 +885,73 @@ mod tests {
         flush_sync();
         // Nothing reported: the mock has no player, so the state stays where the app left it.
         assert_eq!(state.get_untracked(), PlaybackState::Idle);
+    }
+
+    /// The last of `.muted()` and `.muted_while(…)` decides: a constant replaces an earlier
+    /// binding, and a binding replaces an earlier constant.
+    #[test]
+    fn the_last_mute_wins() {
+        let on = Signal::new(true);
+        let initial = |m: Media| m.mute.as_ref().map_or(m.muted, |f| f());
+        let bound = |m: &Media| m.mute.is_some();
+        let m = media("a.mp4").muted_while(on).muted_while(false);
+        assert!(!bound(&m) && !initial(m));
+        let m = media("a.mp4").muted_while(Signal::new(false)).muted();
+        assert!(!bound(&m) && initial(m));
+        let m = media("a.mp4").muted().muted_while(Signal::new(false));
+        assert!(bound(&m) && !initial(m));
+    }
+
+    /// `.muted_while(signal)` starts the player the way the signal first reads and patches each
+    /// change; `.now_playing(signal)` sends what the signal holds once the player is on screen
+    /// and every change after.
+    #[test]
+    fn mute_and_now_playing_follow_their_signals() {
+        let muted = Signal::new(true);
+        let info = Signal::new(Some(NowPlayingInfo {
+            title: "So What".into(),
+            ..NowPlayingInfo::default()
+        }));
+
+        day_core::uninstall_tree();
+        let (mock, probe) = MockToolkit::new();
+        probe.describe_patch::<MediaPatch>(|p| format!("{p:?}"));
+        let options = WindowOptions::default().title("test").size(400.0, 300.0);
+        day_core::launch_with(mock, options, move || {
+            day_core::AnyPiece::new(media("clip.mp4").muted_while(muted).now_playing(info))
+        });
+        day_core::pump_events();
+        flush_sync();
+        let updates = || {
+            probe
+                .mutations()
+                .into_iter()
+                .filter(|l| l.starts_with("update"))
+                .collect::<Vec<_>>()
+        };
+        assert!(
+            updates()
+                .iter()
+                .any(|l| l.contains("NowPlaying(Some") && l.contains("So What")),
+            "the first value reaches the realized player: {:?}",
+            updates()
+        );
+        assert!(
+            !updates().iter().any(|l| l.contains("Muted")),
+            "the first mute rides the props: {:?}",
+            updates()
+        );
+
+        probe.clear_log();
+        muted.set(false);
+        info.set(None);
+        flush_sync();
+        let log = updates();
+        assert!(log.iter().any(|l| l.ends_with("Muted(false)")), "{log:?}");
+        assert!(
+            log.iter().any(|l| l.ends_with("NowPlaying(None)")),
+            "{log:?}"
+        );
     }
 
     /// The wire codes round-trip into the states an app matches on, and an unknown code lands

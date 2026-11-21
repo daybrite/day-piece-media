@@ -284,6 +284,17 @@ fn update(_backend: &mut Gtk, h: &gtk4::Widget, patch: &MediaPatch) {
                 stream.set_volume(v.clamp(0.0, 1.0));
             }
         }
+        MediaPatch::Muted(on) => {
+            // Kept in the props too, which the next `Load` builds its stream from.
+            unsafe {
+                if let Some(mut props) = h.data::<MediaProps>(PROPS_KEY) {
+                    props.as_mut().muted = *on;
+                }
+            }
+            if let Some(stream) = stream_of(h) {
+                stream.set_muted(*on);
+            }
+        }
     }
 }
 

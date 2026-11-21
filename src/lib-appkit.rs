@@ -758,6 +758,7 @@ fn update(backend: &mut AppKit, h: &Retained<NSView>, patch: &MediaPatch) {
             player.replaceCurrentItemWithPlayerItem(None);
         },
         MediaPatch::Volume(v) => unsafe { player.setVolume(v.clamp(0.0, 1.0) as f32) },
+        MediaPatch::Muted(on) => unsafe { player.setMuted(*on) },
     }
 }
 
@@ -781,6 +782,12 @@ fn release(_backend: &mut AppKit, h: &Retained<NSView>) {
     // Pause before the drop below releases the player: teardown, not deallocation order,
     // should be what silences it.
     unsafe { live.player.pause() };
+    // A player that leaves while it owns the system's now-playing surface takes its info with
+    // it: the system's controls must not go on showing (and steering) a player that is gone.
+    let node = live.observer.ivars().node;
+    if REMOTE_NODE.with(std::cell::Cell::get) == Some(node) {
+        publish_now_playing(node, None);
+    }
     live.observer.detach();
 }
 

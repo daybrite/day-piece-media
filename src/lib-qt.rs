@@ -38,6 +38,7 @@ unsafe extern "C" {
     fn day_media_rate(w: *mut c_void, rate: f64);
     fn day_media_poll(w: *mut c_void);
     fn day_media_set_volume(w: *mut c_void, volume: f64);
+    fn day_media_set_muted(w: *mut c_void, muted: c_int);
     fn day_media_is_audio_only(w: *mut c_void) -> c_int;
 }
 
@@ -153,6 +154,7 @@ fn update(_backend: &mut Qt, h: &QtHandle, patch: &MediaPatch) {
             MediaPatch::Pause => day_media_pause(h.0),
             MediaPatch::Stop => day_media_stop(h.0),
             MediaPatch::Volume(v) => day_media_set_volume(h.0, v.clamp(0.0, 1.0)),
+            MediaPatch::Muted(on) => day_media_set_muted(h.0, c_int::from(*on)),
         }
     }
 }

@@ -164,6 +164,10 @@ void day_media_set_volume(void *w, double volume) {
     if (QAudioOutput *a = static_cast<DayMedia *>(w)->audio)
         a->setVolume(static_cast<float>(volume));
 }
+void day_media_set_muted(void *w, int muted) {
+    if (QAudioOutput *a = static_cast<DayMedia *>(w)->audio)
+        a->setMuted(muted != 0);
+}
 void day_media_seek(void *w, double seconds) {
     auto m = static_cast<DayMedia *>(w);
     if (!m->player || !m->player->isSeekable()) { m->report(8, "seek:unsupported"); return; }
@@ -244,6 +248,7 @@ void day_media_play(void *) {}
 void day_media_pause(void *) {}
 void day_media_stop(void *) {}
 void day_media_set_volume(void *, double) {}
+void day_media_set_muted(void *, int) {}
 void day_media_seek(void *w, double) {
     if (g_state_cb) g_state_cb(static_cast<DayMedia *>(w)->id, 8, "seek:unsupported");
 }

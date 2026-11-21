@@ -10,7 +10,7 @@
 // generates the aggregator that registers `dayPiece` with the shim.
 //
 // Commands arrive as the piece's own vocabulary ('load' | 'play' | 'pause' | 'stop' | 'volume' |
-// 'nowplaying' …). Playback state goes back through `pieceEvent` with the piece's report codes as
+// 'muted' | 'nowplaying' …). Playback state goes back through `pieceEvent` with the piece's report codes as
 // `num` (0 idle, 1 loading, 2 playing, 3 paused, 4 ended, 5 error; 9 a transport command from the
 // system), which reaches the Rust front-end as an `Event::Custom`, the same channel the Android
 // renderer uses.
@@ -485,6 +485,17 @@ function update(id: number, cmd: string, arg: string): void {
         if (live.player !== null && ['prepared', 'playing', 'paused', 'completed'].indexOf(live.player.state) >= 0) { applySpeed(live); }
       } else { live.node.update(live.params); }
     } catch (err) { report(id, 8, 'rate:failed'); }
+    return;
+  }
+  if (cmd === 'muted') {
+    live.params.muted = arg === '1';
+    try {
+      if (live.params.audioOnly) {
+        if (live.player !== null) { live.player.setVolume(live.params.muted ? 0 : live.params.volume); }
+      } else { live.node.update(live.params); }
+    } catch (err) {
+      console.error(`day-piece-media: muted failed: ${err}`);
+    }
     return;
   }
   if (live.params.audioOnly) {

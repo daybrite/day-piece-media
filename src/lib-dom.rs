@@ -96,6 +96,7 @@ fn update(backend: &mut Dom, h: &DomHandle, patch: &MediaPatch) {
         // it, and an empty `src` is a format error, not an absence (browser.rs).
         MediaPatch::Stop => super::browser::stop(h.0 as i32),
         MediaPatch::Volume(v) => super::browser::volume(h.0 as i32, *v),
+        MediaPatch::Muted(on) => super::browser::muted(h.0 as i32, *on),
     }
 }
 

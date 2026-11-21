@@ -45,7 +45,10 @@ current source; pause suspends playback. Stop ends playback; load reads the curr
 starts it again. Use load after stop. Volume accepts a constant, signal, or closure returning a
 fraction from zero to one. HarmonyOS video supports mute only; its audio player supports volume.
 The remaining switches are opt-ins: `.looping()` restarts at the end, `.muted()` silences the
-track, and `.no_controls()` hides the toolkit's transport chrome.
+track, and `.no_controls()` hides the toolkit's transport chrome. For a mute button, pass
+`.muted_while(muted)` a `Signal<bool>` or a closure: the player starts the way it first reads
+and follows each change, and the volume stays where it was. Android's `MediaPlayer` has no mute
+of its own, so a muted player there plays at volume zero.
 
 The URL accepts a string, signal, or closure. Native engines support local sources and network
 URLs, with formats and protocols determined by the engine. The browser needs a URL it can
@@ -211,6 +214,11 @@ when the state or the position jumps (a seek, a pause); the system advances its 
 `rate` while `playing`. `None` clears it. `duration: None` and `live: true` describe a stream,
 which hides the position and the seek controls where the platform has them.
 
+A player built in the tree can say the same with `.now_playing(info)`, where `info` is a
+`Signal<Option<NowPlayingInfo>>` or a closure. The piece sends the value once the player is on
+screen and again on every change, so the app updates one signal when the track, the state or
+the position changes.
+
 `on_remote` delivers the commands those surfaces send back: the media keys, the lock screen's
 buttons, a headset click, an MPRIS client such as `playerctl`, a car head unit. Nothing happens
 on its own: the app runs each `RemoteCommand` through its own queue and triggers, so its UI and
@@ -221,7 +229,8 @@ mounted in a tree takes the same callback through `Media::on_remote`.
 On the wire the arms report a command as `report::REMOTE` with the command's text form
 (`RemoteCommand::to_report`: `play`, `pause`, `toggle`, `stop`, `next`, `previous`,
 `seek:<secs>`, `forward:<secs>`, `backward:<secs>`), and receive the info as
-`MediaPatch::NowPlaying` (JSON across the Java, ArkTS and browser bridges).
+`MediaPatch::NowPlaying` (JSON across the Java, ArkTS and browser bridges). A mute change is
+`MediaPatch::Muted(bool)`: command 10 on Android, `muted` on HarmonyOS.
 
 Where the platform shows more than a lock screen, the arms fill it in:
 

@@ -42,6 +42,7 @@ unsafe extern "C" {
     fn day_media_xaml_release(w: *mut c_void);
     fn day_media_xaml_poll(w: *mut c_void);
     fn day_media_xaml_set_volume(w: *mut c_void, volume: f64);
+    fn day_media_xaml_set_muted(w: *mut c_void, muted: c_int);
     fn day_media_xaml_is_audio_only(w: *mut c_void) -> c_int;
     fn day_media_xaml_now_playing(
         w: *mut c_void,
@@ -122,6 +123,7 @@ fn update(_backend: &mut Xaml, h: &WinHandle, patch: &MediaPatch) {
             MediaPatch::Pause => day_media_xaml_pause(h.0),
             MediaPatch::Stop => day_media_xaml_stop(h.0),
             MediaPatch::Volume(v) => day_media_xaml_set_volume(h.0, v.clamp(0.0, 1.0)),
+            MediaPatch::Muted(on) => day_media_xaml_set_muted(h.0, c_int::from(*on)),
         }
     }
 }

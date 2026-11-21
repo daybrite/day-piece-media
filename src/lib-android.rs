@@ -54,7 +54,8 @@ fn update(_backend: &mut Material, h: &AHandle, patch: &MediaPatch) {
     command(h, patch);
 }
 fn command(h: &AHandle, patch: &MediaPatch) {
-    // Commands cross as (code, url, value): 0=load, 1=play, 2=pause, 3=stop, 4=volume.
+    // Commands cross as (code, url, value): 0=load, 1=play, 2=pause, 3=stop, 4=volume, and the
+    // rest as DayMedia.mediaCommand lists them (10=muted, `value` 1 or 0).
     let background;
     let now_playing;
     let (code, url, value) = match patch {
@@ -76,6 +77,7 @@ fn command(h: &AHandle, patch: &MediaPatch) {
         MediaPatch::Pause => (2, "", 0.0),
         MediaPatch::Stop => (3, "", 0.0),
         MediaPatch::Volume(v) => (4, "", v.clamp(0.0, 1.0)),
+        MediaPatch::Muted(on) => (10, "", if *on { 1.0 } else { 0.0 }),
     };
     java(|env| {
         let url = JString::from_str(env, url)?;

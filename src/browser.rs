@@ -7,6 +7,7 @@ day_bridge::bridge! {
     extern "day" {
         fn attach_media(id: i32, volume: f64, muted: bool);
         fn set_volume(id: i32, volume: f64);
+        fn set_muted(id: i32, muted: bool);
         fn stop_media(id: i32);
         fn seek_media(id: i32, seconds: f64);
         fn rate_media(id: i32, rate: f64);
@@ -19,6 +20,10 @@ day_bridge::bridge! {
         function set_volume(id, volume) {
             const el = dayHost.dom.element(id);
             if (el && Number.isFinite(volume)) el.volume = Math.max(0, Math.min(1, volume));
+        }
+        function set_muted(id, muted) {
+            const el = dayHost.dom.element(id);
+            if (el) el.muted = !!muted;
         }
         // Drop the source and let the connection go. The attribute is REMOVED, never set to "":
         // an empty `src` fails resource selection with MEDIA_ERR_SRC_NOT_SUPPORTED, and that
@@ -158,6 +163,8 @@ day_bridge::bridge! {
     #[day_bridge::impl(rust, platforms = [other])]
     fn set_volume(id: i32, volume: f64) { let _ = (id, volume); }
     #[day_bridge::impl(rust, platforms = [other])]
+    fn set_muted(id: i32, muted: bool) { let _ = (id, muted); }
+    #[day_bridge::impl(rust, platforms = [other])]
     fn stop_media(id: i32) { let _ = id; }
     #[day_bridge::impl(rust, platforms = [other])]
     fn seek_media(id: i32, seconds: f64) { let _ = (id, seconds); }
@@ -175,6 +182,9 @@ pub(crate) fn attach(id: i32, volume: f64, muted: bool) {
 }
 pub(crate) fn volume(id: i32, value: f64) {
     set_volume(id, value);
+}
+pub(crate) fn muted(id: i32, on: bool) {
+    set_muted(id, on);
 }
 pub(crate) fn stop(id: i32) {
     stop_media(id);
